@@ -72,11 +72,15 @@ pub fn start_engine(
 
 /// Stops the engine started by [`start_engine`], waiting at most [`ENGINE_STOP_TIMEOUT`].
 pub fn stop_engine(runtime: &tokio::runtime::Runtime, handle_rx: oneshot::Receiver<SidecarHandle>) {
-    let stopped = runtime.block_on(timeout(ENGINE_STOP_TIMEOUT, async {
-        if let Ok(handle) = handle_rx.await {
-            handle.shutdown().await;
-        }
-    }));
+    // `timeout` must be created inside the runtime: it registers with its timer.
+    let stopped = runtime.block_on(async {
+        timeout(ENGINE_STOP_TIMEOUT, async {
+            if let Ok(handle) = handle_rx.await {
+                handle.shutdown().await;
+            }
+        })
+        .await
+    });
     if stopped.is_err() {
         warn!("engine did not stop within {ENGINE_STOP_TIMEOUT:?}");
     }
