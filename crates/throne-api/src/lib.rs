@@ -13,6 +13,8 @@
 //!   [`Error::Api`].
 //! - [`message`] holds the JSON request and response envelopes.
 //! - [`types`] holds the typed objects and request/response bodies of `api.md`.
+//! - [`routes`] holds the routing-profile requests of
+//!   `docs/throne-api/routes-proposal.md` and the `throne://` link codecs.
 //!
 //! Typical use:
 //!
@@ -33,9 +35,11 @@ pub mod error;
 pub mod key;
 pub mod message;
 pub mod protocol;
+pub mod routes;
 pub mod types;
 
 pub use client::Client;
 pub use error::{Error, Result};
 pub use key::ApiKey;
 pub use message::{ApiErrorBody, Method, Request, Response};
+pub use routes::{decode_remote_route_link, decode_route_link, encode_route_link};

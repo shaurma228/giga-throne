@@ -45,7 +45,8 @@ pub enum Action {
     NoHello,
 }
 
-type RequestLog = Arc<Mutex<Vec<(Method, String)>>>;
+/// Every request read so far, with its body.
+type RequestLog = Arc<Mutex<Vec<Request>>>;
 
 /// A mock Throne listening on a random loopback port.
 pub struct MockServer {
@@ -99,6 +100,14 @@ impl MockServer {
 
     /// Method and path of every request read so far, in arrival order.
     pub fn requests(&self) -> Vec<(Method, String)> {
+        self.recorded()
+            .into_iter()
+            .map(|request| (request.method, request.path))
+            .collect()
+    }
+
+    /// Every request read so far, with its body, in arrival order.
+    pub fn recorded(&self) -> Vec<Request> {
         self.requests.lock().expect("request log").clone()
     }
 }
@@ -147,10 +156,7 @@ async fn serve_connection(
             return;
         };
         if let Ok(request) = serde_json::from_slice::<Request>(&plaintext) {
-            requests
-                .lock()
-                .expect("request log")
-                .push((request.method, request.path));
+            requests.lock().expect("request log").push(request);
         }
 
         let action = script

@@ -165,6 +165,10 @@ pub struct Group {
 
 /// Routing profile object.
 ///
+/// The first three fields are in api.md. The rest come from the routing-profile
+/// proposal (`docs/throne-api/routes-proposal.md`) and default when an older
+/// Throne omits them.
+///
 /// See api.md section "Objects -> Route".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Route {
@@ -176,6 +180,30 @@ pub struct Route {
 
     /// Whether this is the currently active route profile.
     pub active: bool,
+
+    /// The profile follows `remote_url`; its rules are replaced on every update.
+    #[serde(default)]
+    pub remote: bool,
+
+    /// Source URL of a remote profile, or `""` when not remote.
+    #[serde(default)]
+    pub remote_url: String,
+
+    /// A remote profile is updated by the `route_auto_update` timer.
+    #[serde(default)]
+    pub auto_update: bool,
+
+    /// Last successful remote update in epoch seconds, `0` when never or not remote.
+    #[serde(default)]
+    pub updated_at: i64,
+
+    /// The profile is a raw sing-box `route` object rather than a list of rules.
+    #[serde(default)]
+    pub raw: bool,
+
+    /// Number of rules (`0` for a raw profile).
+    #[serde(default)]
+    pub rule_count: u64,
 }
 
 /// Connection and running state of Throne.
@@ -1728,6 +1756,454 @@ pub struct HealthStatus {
 
     /// Status of the API listener.
     pub api: ApiListenerState,
+}
+
+// ============================================================================
+// Routing profiles (docs/throne-api/routes-proposal.md)
+// ============================================================================
+
+fn default_route_kind() -> String {
+    "throne-route-profile".to_owned()
+}
+
+const fn default_route_version() -> u32 {
+    1
+}
+
+fn default_rule_type() -> String {
+    "custom".to_owned()
+}
+
+fn default_rule_action() -> String {
+    "route".to_owned()
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Deserializes an optional list of strings. Numbers are accepted too and kept
+/// as their decimal text, since sing-box writes some lists (such as ports) as
+/// numbers.
+fn deserialize_opt_string_list<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(items) = Option::<Vec<serde_json::Value>>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    let mut texts = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            serde_json::Value::String(text) => texts.push(text),
+            serde_json::Value::Number(number) => texts.push(number.to_string()),
+            other => {
+                return Err(serde::de::Error::custom(format!(
+                    "expected a string or a number, found {other}"
+                )))
+            }
+        }
+    }
+    Ok(Some(texts))
+}
+
+/// Serializes a list of ports: each entry that parses as an integer is written
+/// as a JSON number, anything else as a string. Throne reads both.
+fn serialize_opt_port_list<S>(ports: &Option<Vec<String>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match ports {
+        None => serializer.serialize_none(),
+        Some(ports) => ports
+            .iter()
+            .map(|port| match port.parse::<u32>() {
+                Ok(number) => serde_json::Value::from(number),
+                Err(_) => serde_json::Value::from(port.as_str()),
+            })
+            .collect::<Vec<serde_json::Value>>()
+            .serialize(serializer),
+    }
+}
+
+/// Outbound of a route rule or of a profile's default.
+///
+/// Serialized as its name. A name this crate does not know is kept in
+/// [`Outbound::Unknown`] and written back unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum Outbound {
+    /// Through the running profile.
+    #[default]
+    Proxy,
+    /// Straight out of this computer.
+    Direct,
+    /// Dropped.
+    Block,
+    /// Bypasses Cloudflare WARP.
+    WarpBypass,
+    /// Any other outbound name, kept as written.
+    Unknown(String),
+}
+
+impl From<String> for Outbound {
+    fn from(name: String) -> Self {
+        match name.as_str() {
+            "proxy" => Self::Proxy,
+            "direct" => Self::Direct,
+            "block" => Self::Block,
+            "warp-bypass" => Self::WarpBypass,
+            _ => Self::Unknown(name),
+        }
+    }
+}
+
+impl From<Outbound> for String {
+    fn from(outbound: Outbound) -> Self {
+        match outbound {
+            Outbound::Proxy => "proxy".to_owned(),
+            Outbound::Direct => "direct".to_owned(),
+            Outbound::Block => "block".to_owned(),
+            Outbound::WarpBypass => "warp-bypass".to_owned(),
+            Outbound::Unknown(name) => name,
+        }
+    }
+}
+
+/// One rule of a routing profile: sing-box route-rule conditions plus Throne's
+/// own `name`, `type`, `action` and `disabled`.
+///
+/// Conditions this struct does not name are kept in `extra`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteRule {
+    /// Rule name shown by Throne.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+
+    /// `custom`, or one of Throne's simple rule types.
+    #[serde(default = "default_rule_type", rename = "type")]
+    pub r#type: String,
+
+    /// Whether the rule is switched off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
+
+    /// What the rule does, such as `route` or `hijack-dns`.
+    #[serde(default = "default_rule_action")]
+    pub action: String,
+
+    /// Outbound of a `route` rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outbound: Option<Outbound>,
+
+    /// Exact domain names.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain: Option<Vec<String>>,
+
+    /// Domain suffixes.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_suffix: Option<Vec<String>>,
+
+    /// Domain keywords.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_keyword: Option<Vec<String>>,
+
+    /// Domain regular expressions.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_regex: Option<Vec<String>>,
+
+    /// Destination IP CIDR ranges.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ip_cidr: Option<Vec<String>>,
+
+    /// Whether the destination is a private address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_is_private: Option<bool>,
+
+    /// Source IP CIDR ranges.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_ip_cidr: Option<Vec<String>>,
+
+    /// Destination ports. Written as numbers when they are integers, as Throne does.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        serialize_with = "serialize_opt_port_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub port: Option<Vec<String>>,
+
+    /// Destination port ranges such as `"1000:2000"`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub port_range: Option<Vec<String>>,
+
+    /// Source ports. Written as numbers when they are integers, as Throne does.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        serialize_with = "serialize_opt_port_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_port: Option<Vec<String>>,
+
+    /// Source port ranges such as `"1000:2000"`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_port_range: Option<Vec<String>>,
+
+    /// Process names.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub process_name: Option<Vec<String>>,
+
+    /// Process paths.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub process_path: Option<Vec<String>>,
+
+    /// Rule-set names (see `GET /v1/rule-sets`) or rule-set URLs.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_list",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rule_set: Option<Vec<String>>,
+
+    /// Inverts the match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert: Option<bool>,
+
+    /// Network: `tcp` or `udp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+
+    /// Sniffed protocol, such as `dns`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+
+    /// Every other field, kept as written.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// The share object of a routing profile: the JSON a `throne://route/` link
+/// holds (base64url of it), and the body of `POST /v1/routes` and
+/// `PUT /v1/routes/{id}`.
+///
+/// Fields this struct does not name (`dns`, `raw`, `route`, `endpoints`,
+/// `outbound_names`, ...) are kept in `extra`, so reading a profile, editing it
+/// and writing it back loses nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteShare {
+    /// Always `throne-route-profile`.
+    #[serde(default = "default_route_kind")]
+    pub kind: String,
+
+    /// Format version, `1`.
+    #[serde(default = "default_route_version")]
+    pub v: u32,
+
+    /// Profile name.
+    #[serde(default)]
+    pub name: String,
+
+    /// Outbound for traffic that no rule matches.
+    #[serde(default)]
+    pub default_outbound: Outbound,
+
+    /// Rules, in order.
+    #[serde(default)]
+    pub rules: Vec<RouteRule>,
+
+    /// Every other field, kept as written.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Response body for `GET /v1/routes/{id}`.
+///
+/// See routes-proposal.md, section "GET /v1/routes/{id}".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetRouteResponse {
+    /// The routing profile.
+    pub route: Route,
+
+    /// Its share object.
+    pub profile: RouteShare,
+
+    /// Its `throne://route/` link.
+    #[serde(default)]
+    pub link: String,
+}
+
+/// Request body for `POST /v1/routes`. Exactly one of `link`, `profile` and
+/// `remote` is set.
+///
+/// The waiting fields apply to `remote`, whose first fetch may take a while.
+///
+/// See routes-proposal.md, section "POST /v1/routes".
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AddRouteRequest {
+    /// Anything `FromShareInput` reads: a `throne://route/` link, a share object as text,
+    /// or an old rules array.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+
+    /// A share object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<RouteShare>,
+
+    /// A `throne://remoteroute/` link or a single https URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+
+    /// Remote only: whether the new profiles update automatically (default `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update: Option<bool>,
+
+    /// Overrides the name of a `link` or `profile`, or of a single `remote` URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Respond when the first fetch has finished or failed (default `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<bool>,
+
+    /// Seconds to wait before responding with 202 (default `30`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+}
+
+/// Outcome of one remote fetch: `POST /v1/routes` (per profile) and
+/// `POST /v1/routes/{id}/update`.
+///
+/// See routes-proposal.md, sections "POST /v1/routes" and "POST /v1/routes/{id}/update".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteFetchResult {
+    /// Routing profile ID.
+    pub id: i64,
+
+    /// Whether the fetch succeeded.
+    pub ok: bool,
+
+    /// Why the fetch failed, when `ok` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+
+    /// Epoch seconds of the successful update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+}
+
+/// Response body for `POST /v1/routes`.
+///
+/// See routes-proposal.md, section "POST /v1/routes".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddRouteResponse {
+    /// The routing profiles that were added.
+    #[serde(default)]
+    pub routes: Vec<Route>,
+
+    /// One entry per fetched profile, for `remote` requests only.
+    #[serde(default)]
+    pub results: Vec<RouteFetchResult>,
+
+    /// What `FromShareInput` reported. May be empty.
+    #[serde(default)]
+    pub warnings: String,
+}
+
+/// Request body for `PUT /v1/routes/{id}`. Set exactly the fields to change.
+///
+/// The waiting fields apply to `profile`, which restarts the running profile when
+/// this one is active.
+///
+/// See routes-proposal.md, section "PUT /v1/routes/{id}".
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct UpdateRouteRequest {
+    /// Replaces the name, default outbound, rules and DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<RouteShare>,
+
+    /// New name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Whether a remote profile updates automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update: Option<bool>,
+
+    /// `false` with `profile` turns a remote profile into a local copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<bool>,
+
+    /// Respond when the change has finished or failed (default `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<bool>,
+
+    /// Seconds to wait before responding with 202 (default `30`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+}
+
+/// Response body for `PUT /v1/routes/{id}`.
+///
+/// See routes-proposal.md, section "PUT /v1/routes/{id}".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateRouteResponse {
+    /// The routing profile after the change.
+    pub route: Route,
+
+    /// Warnings about the change. May be empty.
+    #[serde(default)]
+    pub warnings: String,
+}
+
+/// Response body for `GET /v1/rule-sets`.
+///
+/// See routes-proposal.md, section "GET /v1/rule-sets".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleSetsResponse {
+    /// Rule-set names Throne knows, sorted.
+    #[serde(default)]
+    pub rule_sets: Vec<String>,
 }
 
 // ============================================================================
