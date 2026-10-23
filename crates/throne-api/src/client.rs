@@ -3,7 +3,8 @@
 //! [`Client`] owns at most one TCP connection to Throne. Requests are strictly
 //! sequential: the connection slot is locked for the whole exchange. The
 //! connection is opened lazily, reopened after 50 s of idleness (Throne closes
-//! it after 60 s), and a failed GET is retried once on a new connection.
+//! it after 60 s; see [`Client::idle_reconnect`]), and a failed GET is retried
+//! once on a new connection.
 //! Any protocol or authentication failure drops the connection.
 
 use std::collections::BTreeMap;
@@ -21,8 +22,12 @@ use crate::key::ApiKey;
 use crate::message::{Method, Request, Response};
 use crate::protocol::{self, Direction, FrameOpener, FrameSealer, FRAME_HEADER_SIZE, RANDOM_SIZE};
 
-/// Connections idle for longer than this are reopened before use.
-const IDLE_RECONNECT: Duration = Duration::from_secs(50);
+/// Default idle time after which a connection is reopened before use.
+///
+/// Throne closes a connection after 60 s without a request (see `protocol.md`).
+/// Reopening at 50 s keeps a request from being sent on a socket Throne has
+/// already closed, and a non-GET cannot be retried after such a failure.
+const DEFAULT_IDLE_RECONNECT: Duration = Duration::from_secs(50);
 
 /// Default time allowed for connecting and completing the handshake.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,6 +46,7 @@ pub struct Client {
     key: ApiKey,
     connect_timeout: Duration,
     request_timeout: Duration,
+    idle_reconnect: Duration,
     slot: Mutex<Option<Connection>>,
 }
 
@@ -52,6 +58,7 @@ impl Client {
             key,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            idle_reconnect: DEFAULT_IDLE_RECONNECT,
             slot: Mutex::new(None),
         }
     }
@@ -65,6 +72,15 @@ impl Client {
     /// Sets the time allowed for one request and its response.
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
+        self
+    }
+
+    /// Sets how long a connection may sit unused before it is reopened.
+    ///
+    /// Defaults to 50 s, which stays under Throne's 60 s idle limit. Lower it
+    /// only in tests.
+    pub fn idle_reconnect(mut self, after: Duration) -> Self {
+        self.idle_reconnect = after;
         self
     }
 
@@ -95,7 +111,7 @@ impl Client {
             // A connection taken out of the slot is dropped on any error, so a
             // cancelled request cannot leave a half-used connection behind.
             let mut conn = match slot.take() {
-                Some(conn) if conn.last_used.elapsed() <= IDLE_RECONNECT => conn,
+                Some(conn) if conn.last_used.elapsed() <= self.idle_reconnect => conn,
                 _ => Connection::open(&self.addr, &self.key, self.connect_timeout).await?,
             };
             match timeout(self.request_timeout, conn.exchange(&plaintext)).await {
