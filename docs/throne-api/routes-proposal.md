@@ -1,6 +1,6 @@
 # Routing profiles over the Throne API — proposal
 
-Status: **draft**, implemented in our fork (`~/git/Throne`, branch `feat/route-api`, based on tag 1.4.0-beta.4)
+Status: **draft**, implemented (not yet built) in our fork (`~/git/Throne`, branch `feat/route-api`, based on tag 1.4.0-beta.4)
 and meant as an upstream PR to throneproj/Throne + throneproj/Throne-api. Until it is merged, giga-throne's
 sidecar must be built from the fork.
 
@@ -86,8 +86,10 @@ carry on. Server profiles inside a shared profile's `endpoints` are never create
 as for remote profiles), and a raw profile from an untrusted source is refused like a restore would refuse it.
 
 Returns `{"routes": [Route…], "results": [{"id": 3, "ok": true}, {"id": 4, "ok": false, "error": "…"}], "warnings": "…"}`:
-`results` only for `remote` (one per fetched profile; a failed fetch keeps the profile, empty, so it can be updated
-later), `warnings` what `FromShareInput` reported (may be `""`).
+`results` is always present and empty unless `remote` (one entry per fetched profile; a failed fetch keeps the
+profile, empty, so it can be updated later), `warnings` what parsing or fetching reported (may be `""`). When the wait
+times out, `remote` answers 202 with `{"routes": [Route…], "state": "fetching"}`. `auto_update` without `remote` is a
+`bad_request`.
 
 Errors: `bad_request` (none or more than one of `link`/`profile`/`remote`, or the input does not parse — the message
 says why), `editing` (the routing profiles are open in an editor in Throne).
@@ -104,23 +106,29 @@ Admin. Changes a profile:
 
 `profile` replaces the name, default outbound, rules and DNS (a remote profile refuses it with `remote_route`: its
 rules come from its URL; send `"remote": false` together with `profile` to turn it into a local copy). `name` and
-`auto_update` change just that. If this is the active profile and a profile runs, the running profile restarts so the
-change takes effect, so the request takes the [waiting](api.md#waiting) fields.
+`auto_update` change just that (`auto_update` on a local profile is `not_remote`, an empty `name` and `remote: false`
+without `profile` are `bad_request`). If this is the active profile, a profile runs and the rules, default outbound or
+DNS changed, the running profile restarts so the change takes effect (a rename alone does not restart), so the request
+takes the [waiting](api.md#waiting) fields. Raw profiles are refused (`bad_request`) here and in `POST`.
 
-Returns `{"route": Route, "warnings": "…"}`. Errors: `not_found`, `bad_request`, `remote_route`, `editing`, plus the
-errors of `PUT /v1/connection` for the restart.
+Returns `{"route": Route, "warnings": "…"}`. Errors: `not_found`, `bad_request`, `remote_route`, `not_remote`,
+`editing`, `busy` (a fetch of this profile is in flight, or Throne is connecting or stopping while this is the active
+profile), plus the errors of `PUT /v1/connection` for the restart.
 
 ## `DELETE /v1/routes/{id}`
 
-Admin. Deletes a profile. Errors: `not_found`, `route_active` (activate another profile first), `last_route`
-(Throne keeps at least one), `editing`.
+Admin. Deletes a profile. Returns `{"deleted": 2}`. Errors: `not_found`, `route_active` (activate another profile
+first), `last_route` (Throne keeps at least one), `editing`, `busy` (a fetch of it is in flight).
 
 ## `POST /v1/routes/{id}/update`
 
 Admin. Fetches a remote profile again now. Takes the [waiting](api.md#waiting) fields; restarts the running profile
 if this one is active and its rules changed. Returns an [Update result](api.md#update-result)-like
-`{"id": 2, "ok": true, "updated_at": 1760000000}` or `{"id": 2, "ok": false, "error": "…"}`.
-Errors: `not_found`, `not_remote`.
+`{"id": 2, "ok": true, "updated_at": 1760000000}` or `{"id": 2, "ok": false, "error": "…"}` (a failed fetch is a 200
+with `ok: false`); 202 `{"id": 2, "state": "updating"}` when the wait times out.
+Errors: `not_found`, `not_remote`, `editing`, `busy`.
+
+New error codes, all HTTP 409: `remote_route`, `route_active`, `last_route`, `not_remote`.
 
 ## `GET /v1/rule-sets`
 
