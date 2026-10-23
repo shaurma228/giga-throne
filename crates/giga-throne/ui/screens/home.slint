@@ -3,6 +3,7 @@ import { Theme } from "../theme.slint";
 // Main screen: connection status, the big connect button and the session timer.
 export component HomeScreen inherits Rectangle {
     in-out property <bool> connected: false;
+    in property <string> engine-status;
 
     VerticalLayout {
         alignment: center;
@@ -79,5 +80,19 @@ export component HomeScreen inherits Rectangle {
                 font-size: 32px;
             }
         }
+    }
+
+    // Engine status line, pinned to the bottom center.
+    Text {
+        x: 0px;
+        y: root.height - 40px;
+        width: root.width;
+        height: 20px;
+        text: root.engine-status;
+        color: Theme.muted;
+        font-family: Theme.font-body;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }

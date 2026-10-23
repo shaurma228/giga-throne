@@ -13,12 +13,15 @@ export component AppWindow inherits Window {
     background: Theme.bg;
     no-frame: false;
 
+    in property <string> engine-status: "Движок запускается…";
+
     HorizontalLayout {
         NavRail {
         }
 
         HomeScreen {
             horizontal-stretch: 1;
+            engine-status: root.engine-status;
         }
     }
 }

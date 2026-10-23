@@ -70,6 +70,8 @@ sidecar/          бинарь Throne для разработки (в git не �
 Ключ генерируем сами при первом старте (права 0600). Путь к бинарю: `GIGA_THRONE_SIDECAR`, иначе `sidecar/Throne/Throne`,
 иначе рядом с нашим исполняемым файлом. Порт по умолчанию 9096, чтобы не конфликтовать с обычным Throne на 9095.
 Коды выхода и watchdog описаны в `api.md` (раздел Headless Throne).
+Ещё передаём `--restart-mode exit`: перезапуск (код 75) делает наш супервизор. Нужен Throne **≥ 1.4.0**: в 1.3.x headless-режима нет.
+Для разработки в `sidecar/` лежит 1.4.0-beta.4 (версия в `sidecar/VERSION`). Проверить, что он жив: `sidecar/Throne/Throne --headless --health --data-dir <data>/throne`.
 
 ## Дизайн
 

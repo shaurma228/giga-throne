@@ -10,6 +10,11 @@ slint = "1.18.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 throne-api.workspace = true
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
+directories = "6.0.0"
 
 [build-dependencies]
 slint-build = "1.18.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"

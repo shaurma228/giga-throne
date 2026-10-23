@@ -3,6 +3,7 @@
 mod app;
 mod sidecar;
 
+use anyhow::Context;
 use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
@@ -11,7 +12,15 @@ fn main() -> anyhow::Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("starting the async runtime")?;
+
     let window = AppWindow::new()?;
-    window.run()?;
+    let engine = app::start_engine(&runtime, &window);
+    let result = window.run();
+    app::stop_engine(&runtime, engine);
+    result?;
     Ok(())
 }
