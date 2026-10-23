@@ -43,6 +43,8 @@ fn main() -> anyhow::Result<()> {
         Arc::clone(&sysproxy),
         data_root,
     );
+    // Ctrl+C or a session logout would otherwise kill us with the system proxy still set.
+    runtime.spawn(quit_on_signal());
     let result = window.run();
     // Before the engine stops: the system proxy must not outlive Throne.
     if let Err(err) = sysproxy.disable() {
@@ -53,3 +55,38 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Leaves the event loop on SIGINT, SIGTERM or SIGHUP, so the normal shutdown path runs.
+#[cfg(unix)]
+async fn quit_on_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let (mut int, mut term, mut hup) = match (
+        signal(SignalKind::interrupt()),
+        signal(SignalKind::terminate()),
+        signal(SignalKind::hangup()),
+    ) {
+        (Ok(int), Ok(term), Ok(hup)) => (int, term, hup),
+        _ => {
+            warn!("could not listen for shutdown signals");
+            return;
+        }
+    };
+    tokio::select! {
+        _ = int.recv() => {}
+        _ = term.recv() => {}
+        _ = hup.recv() => {}
+    }
+    warn!("signal received, shutting down");
+    if let Err(err) = slint::quit_event_loop() {
+        warn!("could not stop the event loop: {err}");
+    }
+}
+
+#[cfg(not(unix))]
+async fn quit_on_signal() {
+    if tokio::signal::ctrl_c().await.is_ok() {
+        if let Err(err) = slint::quit_event_loop() {
+            warn!("could not stop the event loop: {err}");
+        }
+    }
+}
