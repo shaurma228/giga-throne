@@ -1,5 +1,5 @@
 import { Theme } from "../theme.slint";
-import { LineEdit, ListView } from "std-widgets.slint";
+import { GtInput } from "text-input.slint";
 
 // One row of the server list. Built in Rust from a profile (see src/view.rs).
 export struct ServerItem {
@@ -48,21 +48,26 @@ export component ServerList inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
 
-            input := LineEdit {
+            input := GtInput {
                 horizontal-stretch: 1;
-                height: 40px;
                 text <=> root.import-text;
-                placeholder-text: "vless://, hy2://, ss:// или ссылка на список";
-                accepted => {
-                    root.import-link(self.text);
+                placeholder: "vless://, hy2://, ss:// или ссылка на список";
+                accepted(text) => {
+                    root.import-link(text);
                 }
             }
 
             Rectangle {
-                width: 88px;
+                width: 100px;
                 height: 40px;
-                border-radius: Theme.radius-s;
-                background: Theme.accent;
+                border-radius: 12px;
+                background: add-touch.pressed ? Theme.accent.darker(0.15)
+                    : add-touch.has-hover ? Theme.accent.brighter(0.12)
+                    : Theme.accent;
+
+                animate background {
+                    duration: Theme.anim-fast;
+                }
 
                 Text {
                     width: parent.width;
@@ -70,13 +75,14 @@ export component ServerList inherits Rectangle {
                     text: "Добавить";
                     color: Theme.on-accent;
                     font-family: Theme.font-body;
-                    font-size: 13px;
+                    font-size: 14px;
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 
-                TouchArea {
+                add-touch := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
                         root.import-link(input.text);
                     }
@@ -92,155 +98,193 @@ export component ServerList inherits Rectangle {
             wrap: word-wrap;
         }
 
-        if root.servers.length == 0 : Text {
-            text: "Пока пусто — вставь ссылку выше";
-            color: Theme.muted;
-            font-family: Theme.font-body;
-            font-size: 13px;
-            wrap: word-wrap;
-        }
-
-        ListView {
+        // List area: takes the rest of the panel. The empty hint is centered here.
+        Rectangle {
             vertical-stretch: 1;
 
-            for server in root.servers : Rectangle {
-                private property <color> tag-color: server.proto == "VLESS" ? Theme.proto-vless
-                    : server.proto == "HY2" ? Theme.proto-hy2
-                    : server.proto == "TUIC" ? Theme.proto-tuic
-                    : server.proto == "TROJAN" ? Theme.proto-trojan
-                    : server.proto == "SS" ? Theme.proto-ss
-                    : server.proto == "WG" ? Theme.proto-wg
-                    : Theme.muted;
-                private property <color> bar-color: server.bars >= 3 ? Theme.ping-ok
-                    : server.bars == 2 ? Theme.ping-mid
-                    : Theme.ping-bad;
+            if root.servers.length == 0 : Text {
+                width: parent.width;
+                height: parent.height;
+                text: "Пока пусто — вставь ссылку выше";
+                color: Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
 
-                height: 56px;
-                border-radius: Theme.radius-m;
-                background: server.running ? Theme.raised : transparent;
-                border-width: server.running ? 1.5px : 0px;
-                border-color: Theme.accent;
+            flick := Flickable {
+                x: 0px;
+                width: parent.width - 8px;
+                height: parent.height;
+                interactive: true;
+                visible: root.servers.length > 0;
+                content-width: self.width;
+                // 56px row + 8px spacing per item.
+                content-height: root.servers.length * 64px;
 
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 12px;
-                    spacing: 12px;
+                rows := VerticalLayout {
+                    spacing: 8px;
 
-                    Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: Theme.radius-s;
-                        background: server.running ? Theme.line : Theme.raised;
+                    for server in root.servers : Rectangle {
+                        private property <color> tag-color: server.proto == "VLESS" ? Theme.proto-vless
+                            : server.proto == "HY2" ? Theme.proto-hy2
+                            : server.proto == "TUIC" ? Theme.proto-tuic
+                            : server.proto == "TROJAN" ? Theme.proto-trojan
+                            : server.proto == "SS" ? Theme.proto-ss
+                            : server.proto == "WG" ? Theme.proto-wg
+                            : Theme.muted;
+                        private property <color> bar-color: server.bars >= 3 ? Theme.ping-ok
+                            : server.bars == 2 ? Theme.ping-mid
+                            : Theme.ping-bad;
 
-                        Text {
-                            width: parent.width;
-                            height: parent.height;
-                            text: server.code;
-                            color: Theme.text;
-                            font-family: Theme.font-display;
-                            font-size: 12px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+                        height: 56px;
+                        border-radius: Theme.radius-m;
+                        background: server.running ? Theme.raised
+                            : row-touch.has-hover ? Theme.surface
+                            : transparent;
+                        border-width: server.running ? 1.5px : 0px;
+                        border-color: Theme.accent;
 
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        spacing: 3px;
-
-                        Text {
-                            text: server.name;
-                            color: Theme.text;
-                            font-family: Theme.font-body;
-                            font-size: 14px;
-                            font-weight: 700;
-                            overflow: elide;
+                        animate background {
+                            duration: Theme.anim-fast;
                         }
 
                         HorizontalLayout {
-                            alignment: start;
+                            padding-left: 8px;
+                            padding-right: 12px;
+                            spacing: 12px;
 
                             Rectangle {
-                                height: 18px;
-                                width: tag.preferred-width + 12px;
-                                border-radius: 6px;
-                                background: tag-color.with-alpha(0.12);
+                                width: 34px;
+                                height: 34px;
+                                border-radius: Theme.radius-s;
+                                background: server.running ? Theme.line : Theme.raised;
 
-                                tag := Text {
+                                Text {
                                     width: parent.width;
                                     height: parent.height;
-                                    text: server.proto;
-                                    color: tag-color;
-                                    font-family: Theme.font-body;
-                                    font-size: 11px;
+                                    text: server.code;
+                                    color: Theme.text;
+                                    font-family: Theme.font-display;
+                                    font-size: 12px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
                             }
+
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+
+                                Text {
+                                    text: server.name;
+                                    color: Theme.text;
+                                    font-family: Theme.font-body;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                }
+
+                                HorizontalLayout {
+                                    alignment: start;
+
+                                    Rectangle {
+                                        height: 18px;
+                                        width: tag.preferred-width + 12px;
+                                        border-radius: 6px;
+                                        background: tag-color.with-alpha(0.12);
+
+                                        tag := Text {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            text: server.proto;
+                                            color: tag-color;
+                                            font-family: Theme.font-body;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: 8px;
+
+                                HorizontalLayout {
+                                    alignment: end;
+                                    spacing: 2px;
+
+                                    if server.ping < 0 : Text {
+                                        width: 18px;
+                                        text: "×";
+                                        color: Theme.ping-bad;
+                                        font-family: Theme.font-body;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    if server.ping >= 0 : Rectangle {
+                                        width: 3px;
+                                        height: 6px;
+                                        border-radius: 1px;
+                                        background: server.bars >= 1 ? bar-color : Theme.line;
+                                    }
+
+                                    if server.ping >= 0 : Rectangle {
+                                        width: 3px;
+                                        height: 10px;
+                                        border-radius: 1px;
+                                        background: server.bars >= 2 ? bar-color : Theme.line;
+                                    }
+
+                                    if server.ping >= 0 : Rectangle {
+                                        width: 3px;
+                                        height: 14px;
+                                        border-radius: 1px;
+                                        background: server.bars >= 3 ? bar-color : Theme.line;
+                                    }
+                                }
+
+                                Text {
+                                    width: 56px;
+                                    text: server.ping-text;
+                                    color: server.ping < 0 ? Theme.ping-bad : Theme.muted;
+                                    font-family: Theme.font-mono;
+                                    font-size: 12px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
                         }
-                    }
 
-                    HorizontalLayout {
-                        alignment: end;
-                        spacing: 8px;
-
-                        HorizontalLayout {
-                            alignment: end;
-                            spacing: 2px;
-
-                            if server.ping < 0 : Text {
-                                width: 18px;
-                                text: "×";
-                                color: Theme.ping-bad;
-                                font-family: Theme.font-body;
-                                font-size: 14px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                        row-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.pick(server.id);
                             }
-
-                            if server.ping >= 0 : Rectangle {
-                                width: 3px;
-                                height: 6px;
-                                border-radius: 1px;
-                                background: server.bars >= 1 ? bar-color : Theme.line;
-                            }
-
-                            if server.ping >= 0 : Rectangle {
-                                width: 3px;
-                                height: 10px;
-                                border-radius: 1px;
-                                background: server.bars >= 2 ? bar-color : Theme.line;
-                            }
-
-                            if server.ping >= 0 : Rectangle {
-                                width: 3px;
-                                height: 14px;
-                                border-radius: 1px;
-                                background: server.bars >= 3 ? bar-color : Theme.line;
-                            }
-                        }
-
-                        Text {
-                            width: 56px;
-                            text: server.ping-text;
-                            color: server.ping < 0 ? Theme.ping-bad : Theme.muted;
-                            font-family: Theme.font-mono;
-                            font-size: 12px;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
                         }
                     }
                 }
+            }
 
-                TouchArea {
-                    clicked => {
-                        root.pick(server.id);
-                    }
-                }
+            // Thin scroll indicator, shown only when the list overflows.
+            Rectangle {
+                x: parent.width - 4px;
+                y: (flick.height - self.height) * (-flick.content-y / max(1px, flick.content-height - flick.height));
+                width: 4px;
+                height: max(24px, flick.height * (flick.height / max(1px, flick.content-height)));
+                border-radius: 2px;
+                background: Theme.line;
+                visible: flick.content-height > flick.height;
             }
         }
     }

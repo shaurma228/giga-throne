@@ -1,0 +1,82 @@
+import { Theme } from "../theme.slint";
+
+// Single-line text field in our own style. Built on the low-level TextInput,
+// so editing, selection and Ctrl+V work as usual; std LineEdit ignores the dark theme.
+export component GtInput inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+
+    callback accepted(string);
+
+    height: 40px;
+    min-width: 1px;
+    border-radius: 12px;
+    border-width: 1.5px;
+    border-color: ti.has-focus ? Theme.accent : Theme.line;
+    background: Theme.bg;
+    clip: true;
+    forward-focus: ti;
+
+    animate border-color {
+        duration: Theme.anim-fast;
+    }
+
+    public function clear() {
+        root.text = "";
+    }
+
+    // Clicks on the padding (outside the TextInput) focus the field too.
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => {
+            ti.focus();
+        }
+    }
+
+    // Text viewport: keeps the cursor visible when the text is wider than the box.
+    Rectangle {
+        x: 12px;
+        width: root.width - 24px;
+        height: root.height;
+        clip: true;
+
+        hint := Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.placeholder;
+            visible: root.text == "";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+
+        ti := TextInput {
+            property <length> computed-x;
+
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            vertical-alignment: center;
+            single-line: true;
+            text <=> root.text;
+            color: Theme.text;
+            font-family: Theme.font-body;
+            font-size: 14px;
+            selection-background-color: Theme.accent;
+            selection-foreground-color: Theme.on-accent;
+
+            cursor-position-changed(cursor-position) => {
+                if cursor-position.x + self.computed-x < 0px {
+                    self.computed-x = -cursor-position.x;
+                } else if cursor-position.x + self.computed-x > parent.width - self.text-cursor-width {
+                    self.computed-x = parent.width - cursor-position.x - self.text-cursor-width;
+                }
+            }
+
+            accepted => {
+                root.accepted(self.text);
+            }
+        }
+    }
+}
