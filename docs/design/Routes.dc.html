@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>giga-throne — маршруты</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&amp;family=Manrope:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#C8FF4D}a:hover{color:#E2FF9A}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1040px; height: 680px; box-sizing: border-box; display: flex; background: #0E0E12; color: #F4F4F6; font-family: Manrope, system-ui, sans-serif; overflow: hidden; border-radius: 20px">
+
+  <nav aria-label="Разделы" style="width: 72px; flex-shrink: 0; background: #121217; border-right: 1px solid #1F1F27; display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 8px; box-sizing: border-box">
+    <div style="width: 40px; height: 40px; border-radius: 12px; background: {{accent}}; color: #0E0E12; display: flex; align-items: center; justify-content: center; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 15px; margin-bottom: 16px">gt</div>
+    <a href="Main.dc.html" aria-label="Главная" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Серверы" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"></path></svg>
+    </a>
+    <a href="Routes.dc.html" aria-label="Маршруты" style="width: 44px; height: 44px; border-radius: 12px; background: #22222B; color: {{accent}}; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18"></path><path d="M6 9a6 6 0 0 0 6 6h6"></path><path d="M15 12l3 3-3 3"></path></svg>
+    </a>
+    <a href="Routes.dc.html" aria-label="Статистика" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11"></path><path d="M12 20V4"></path><path d="M19 20v-6"></path></svg>
+    </a>
+  </nav>
+
+  <main style="flex-grow: 1; min-width: 0; padding: 28px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 26px">Маршруты</h1>
+        <div style="font-size: 14px; color: #B4B4BE">Что идёт через VPN, а что — напрямую</div>
+      </div>
+      <div role="radiogroup" aria-label="Регион" style="display: flex; gap: 6px">
+        <sc-for list="{{regions}}" as="r" hint-placeholder-count="3">
+          <button role="radio" aria-checked="{{r.on}}" onClick="{{r.pick}}" style="{{r.style}}">{{r.label}}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8A8A96">Готовые режимы</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+        <sc-for list="{{presets}}" as="p" hint-placeholder-count="5">
+          <button onClick="{{p.pick}}" aria-pressed="{{p.on}}" style="{{p.style}}">
+            <span style="display: flex; align-items: center; justify-content: space-between; width: 100%">
+              <span style="font-weight: 800; font-size: 15px; color: #F4F4F6">{{p.title}}</span>
+              <sc-if value="{{p.recommended}}" hint-placeholder-val="{{ false }}">
+                <span style="height: 22px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; background: {{accentSoft}}; color: {{accent}}">рекомендуем</span>
+              </sc-if>
+            </span>
+            <span style="font-size: 13px; line-height: 18px; color: #B4B4BE; text-align: left">{{p.desc}}</span>
+            <span style="font-size: 11px; color: #8A8A96; font-family: 'JetBrains Mono', monospace">{{p.source}}</span>
+          </button>
+        </sc-for>
+        <a href="RouteEditor.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 118px; border-radius: 16px; border: 1.5px dashed #3A3A46; color: #F4F4F6; text-decoration: none; font-weight: 700; font-size: 14px">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          Свой маршрут
+        </a>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px; min-height: 0">
+      <div style="display: flex; align-items: center; justify-content: space-between">
+        <h2 style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8A8A96">Мои маршруты</h2>
+        <button style="height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid #2A2A34; background: transparent; color: #F4F4F6; font-size: 13px; font-weight: 600">Импорт ссылки</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{mine}}" as="m" hint-placeholder-count="2">
+          <div style="{{m.style}}">
+            <button onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="display: flex; align-items: center; gap: 12px; flex-grow: 1; min-width: 0; height: 100%; border: none; background: transparent; color: inherit; cursor: pointer; text-align: left; padding: 0">
+              <span style="{{m.radio}}"></span>
+              <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+                <span style="font-weight: 700; font-size: 14px">{{m.name}}</span>
+                <span style="font-size: 12px; color: #8A8A96">{{m.meta}}</span>
+              </span>
+            </button>
+            <a href="RouteEditor.dc.html" style="height: 32px; padding: 0 12px; border-radius: 10px; background: #22222B; color: #F4F4F6; font-size: 13px; font-weight: 600; text-decoration: none; display: flex; align-items: center">Изменить</a>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C8FF4D","options":["#C8FF4D","#FF7AD9","#5CE1FF","#FF9F43"]},"$preview":{"width":1040,"height":680}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { region: 'ru', active: 'ru-blocked' };
+  }
+  rgba(hex, a) {
+    const n = parseInt(hex.replace('#', ''), 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#C8FF4D';
+    const { region, active } = this.state;
+    const sets = {
+      ru: [
+        { id: 'all', title: 'Всё через VPN', desc: 'Каждый сайт и приложение идут через сервер.', source: 'Default' },
+        { id: 'ru-blocked', title: 'Только заблокированное', desc: 'VPN только для сайтов, заблокированных в РФ. Остальное — напрямую и быстро.', source: 'Proxy Russia Blocked', recommended: true },
+        { id: 'ru-bypass', title: 'Всё, кроме России', desc: 'Российские сайты, банки и госуслуги — напрямую, остальное через VPN.', source: 'Bypass Russia' },
+        { id: 'ru-antizapret', title: 'Антизапрет', desc: 'Список сообщества Antizapret: блокировки и замедления.', source: 'Proxy Antizapret' },
+        { id: 'ru-refilter', title: 'Re:filter', desc: 'Список Re:filter: заблокированные домены и IP.', source: 'Proxy Refilter' }
+      ],
+      cn: [
+        { id: 'all', title: 'Всё через VPN', desc: 'Каждый сайт и приложение идут через сервер.', source: 'Default' },
+        { id: 'cn-blocked', title: 'Только заблокированное', desc: 'VPN только для сайтов за Великим файрволом.', source: 'Proxy China Blocked', recommended: true },
+        { id: 'cn-bypass', title: 'Всё, кроме Китая', desc: 'Китайские сайты — напрямую, остальное через VPN.', source: 'Bypass China' }
+      ],
+      ir: [
+        { id: 'all', title: 'Всё через VPN', desc: 'Каждый сайт и приложение идут через сервер.', source: 'Default' },
+        { id: 'ir-bypass', title: 'Всё, кроме Ирана', desc: 'Иранские сайты — напрямую, остальное через VPN.', source: 'Bypass Iran', recommended: true }
+      ]
+    };
+    const regionDefs = [['ru', 'Россия'], ['cn', 'Китай'], ['ir', 'Иран']];
+    const regions = regionDefs.map(([id, label]) => ({
+      label, on: region === id ? 'true' : 'false',
+      pick: () => this.setState({ region: id }),
+      style: 'height: 34px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer; ' +
+        (region === id ? 'background: #F4F4F6; color: #0E0E12; border: 1px solid #F4F4F6;' : 'background: transparent; color: #B4B4BE; border: 1px solid #2A2A34;')
+    }));
+    const presets = sets[region].map((p) => ({
+      ...p, recommended: !!p.recommended, on: active === p.id ? 'true' : 'false',
+      pick: () => this.setState({ active: p.id }),
+      style: 'display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 118px; padding: 16px; border-radius: 16px; cursor: pointer; box-sizing: border-box; text-align: left; font-family: inherit; ' +
+        (active === p.id ? 'background: #1C1C24; border: 1.5px solid ' + accent + ';' : 'background: #15151B; border: 1.5px solid #22222B;')
+    }));
+    const mineRaw = [
+      { id: 'work', name: 'Работа', meta: 'свой · 7 правил' },
+      { id: 'games', name: 'Игры напрямую', meta: 'свой · 3 правила' }
+    ];
+    const mine = mineRaw.map((m) => {
+      const on = active === m.id;
+      return {
+        ...m, on: on ? 'true' : 'false',
+        pick: () => this.setState({ active: m.id }),
+        radio: 'width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box; flex-shrink: 0; ' + (on ? 'border: 5px solid ' + accent + ';' : 'border: 2px solid #3A3A46;'),
+        style: 'display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 12px 0 16px; border-radius: 14px; box-sizing: border-box; ' +
+          (on ? 'background: #1C1C24; border: 1.5px solid ' + accent + ';' : 'background: #15151B; border: 1.5px solid #22222B;')
+      };
+    });
+    return { accent, accentSoft: this.rgba(accent, 0.14), regions, presets, mine };
+  }
+}
+</script>
+</body>
+</html>

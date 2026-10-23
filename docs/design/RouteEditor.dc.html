@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>giga-throne — редактор маршрута</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&amp;family=Manrope:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#C8FF4D}a:hover{color:#E2FF9A}
+button,input{font-family:inherit}
+input::placeholder{color:#8A8A96}
+</style>
+</helmet>
+<div style="width: 1040px; height: 680px; box-sizing: border-box; display: flex; background: #0E0E12; color: #F4F4F6; font-family: Manrope, system-ui, sans-serif; overflow: hidden; border-radius: 20px">
+
+  <nav aria-label="Разделы" style="width: 72px; flex-shrink: 0; background: #121217; border-right: 1px solid #1F1F27; display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 8px; box-sizing: border-box">
+    <div style="width: 40px; height: 40px; border-radius: 12px; background: {{accent}}; color: #0E0E12; display: flex; align-items: center; justify-content: center; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 15px; margin-bottom: 16px">gt</div>
+    <a href="Main.dc.html" aria-label="Главная" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Серверы" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"></path></svg>
+    </a>
+    <a href="Routes.dc.html" aria-label="Маршруты" style="width: 44px; height: 44px; border-radius: 12px; background: #22222B; color: {{accent}}; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18"></path><path d="M6 9a6 6 0 0 0 6 6h6"></path><path d="M15 12l3 3-3 3"></path></svg>
+    </a>
+  </nav>
+
+  <main style="flex-grow: 1; min-width: 0; padding: 22px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+    <header style="display: flex; align-items: center; gap: 12px">
+      <a href="Routes.dc.html" aria-label="Назад к маршрутам" style="width: 36px; height: 36px; border-radius: 10px; background: #22222B; color: #F4F4F6; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
+      </a>
+      <label style="flex-grow: 1; min-width: 0">
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Название маршрута</span>
+        <input type="text" value="Работа" style="width: 100%; height: 40px; border: none; background: transparent; color: #F4F4F6; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 22px; outline: none">
+      </label>
+      <div role="radiogroup" aria-label="Режим редактора" style="display: flex; padding: 4px; border-radius: 12px; background: #17171D; border: 1px solid #262630; gap: 4px; flex-shrink: 0">
+        <button role="radio" aria-checked="{{simpleOn}}" onClick="{{toSimple}}" style="{{simpleTab}}">Просто</button>
+        <button role="radio" aria-checked="{{advOn}}" onClick="{{toAdv}}" style="{{advTab}}">Продвинуто</button>
+      </div>
+      <button style="height: 40px; padding: 0 18px; border-radius: 12px; border: none; background: {{accent}}; color: #0E0E12; font-size: 14px; font-weight: 800; flex-shrink: 0">Сохранить</button>
+    </header>
+
+    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: #15151B; border: 1px solid #22222B">
+      <span style="font-size: 14px; font-weight: 700; flex-grow: 1">Всё остальное</span>
+      <span style="font-size: 12px; color: #8A8A96">что не попало ни в одно правило</span>
+      <div role="radiogroup" aria-label="По умолчанию" style="display: flex; padding: 3px; border-radius: 10px; background: #0F0F14; gap: 3px">
+        <button role="radio" aria-checked="{{defProxyOn}}" onClick="{{defProxy}}" style="{{defProxyStyle}}">Через VPN</button>
+        <button role="radio" aria-checked="{{defDirectOn}}" onClick="{{defDirect}}" style="{{defDirectStyle}}">Напрямую</button>
+      </div>
+    </div>
+
+    <sc-if value="{{isSimple}}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; flex-grow: 1">
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; flex-grow: 1; min-height: 0">
+          <sc-for list="{{buckets}}" as="b" hint-placeholder-count="3">
+            <section style="display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: #15151B; border: 1px solid #22222B; min-height: 0">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span style="width: 10px; height: 10px; border-radius: 50%; background: {{b.color}}"></span>
+                <h2 style="margin: 0; font-size: 15px; font-weight: 800; flex-grow: 1">{{b.title}}</h2>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8A8A96">{{b.count}}</span>
+              </div>
+              <div style="display: flex; gap: 6px">
+                <label style="flex-grow: 1; min-width: 0; display: flex">
+                  <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Добавить в «{{b.title}}»</span>
+                  <input type="text" placeholder="сайт, IP или программа" value="{{b.draft}}" onInput="{{b.onInput}}" style="width: 100%; height: 36px; padding: 0 10px; border-radius: 10px; border: 1.5px solid #2A2A34; background: #0F0F14; color: #F4F4F6; font-size: 13px; outline: none; box-sizing: border-box">
+                </label>
+                <button onClick="{{b.add}}" aria-label="Добавить" style="width: 36px; height: 36px; border-radius: 10px; border: none; background: #22222B; color: #F4F4F6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                </button>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow: hidden">
+                <sc-for list="{{b.items}}" as="it" hint-placeholder-count="3">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; border-radius: 8px; background: #22222B; font-size: 13px; max-width: 100%">
+                    <span style="font-size: 10px; font-weight: 800; letter-spacing: 0.05em; color: {{it.kindColor}}">{{it.kind}}</span>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{it.value}}</span>
+                    <button onClick="{{it.remove}}" aria-label="Убрать {{it.value}}" style="width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent; color: #8A8A96; display: flex; align-items: center; justify-content: center; cursor: pointer">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+                    </button>
+                  </span>
+                </sc-for>
+              </div>
+            </section>
+          </sc-for>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+          <span style="font-size: 13px; color: #8A8A96; margin-right: 4px">Готовые списки:</span>
+          <sc-for list="{{lists}}" as="l" hint-placeholder-count="4">
+            <button onClick="{{l.add}}" style="height: 30px; padding: 0 10px; border-radius: 8px; border: 1px dashed #3A3A46; background: transparent; color: #F4F4F6; font-size: 12px; font-weight: 600; cursor: pointer">+ {{l.label}}</button>
+          </sc-for>
+          <span style="font-size: 12px; color: #8A8A96; margin-left: auto">Сайт включает все поддомены</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isAdv}}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; gap: 14px; flex-grow: 1; min-height: 0">
+        <section style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 12px; color: #8A8A96; padding: 0 2px 4px">Правила проверяются сверху вниз — срабатывает первое подходящее</div>
+          <sc-for list="{{rules}}" as="r" hint-placeholder-count="5">
+            <div style="{{r.rowStyle}}">
+              <button onClick="{{r.select}}" aria-pressed="{{r.sel}}" style="display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; height: 100%; border: none; background: transparent; color: inherit; cursor: pointer; text-align: left; padding: 0">
+                <span style="width: 22px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8A8A96; text-align: right; flex-shrink: 0">{{r.n}}</span>
+                <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1">
+                  <span style="font-weight: 700; font-size: 14px; color: {{r.nameColor}}">{{r.name}}</span>
+                  <span style="font-size: 12px; color: #8A8A96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.summary}}</span>
+                </span>
+                <span style="{{r.pill}}">{{r.actionLabel}}</span>
+              </button>
+              <button onClick="{{r.toggle}}" role="switch" aria-checked="{{r.onStr}}" aria-label="Включить правило {{r.name}}" style="{{r.switchTrack}}">
+                <span style="{{r.switchKnob}}"></span>
+              </button>
+            </div>
+          </sc-for>
+          <div style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; border-radius: 12px; border: 1px dashed #2A2A34; color: #B4B4BE; font-size: 13px">
+            <span style="width: 22px"></span>
+            <span style="flex-grow: 1">Всё остальное</span>
+            <span style="{{defaultPill}}">{{defaultLabel}}</span>
+          </div>
+          <button onClick="{{addRule}}" style="height: 40px; border-radius: 12px; border: 1.5px dashed #3A3A46; background: transparent; color: #F4F4F6; font-size: 13px; font-weight: 700; cursor: pointer">+ Правило</button>
+        </section>
+
+        <aside style="width: 330px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 16px; background: #15151B; border: 1px solid #22222B; box-sizing: border-box">
+          <div style="display: flex; align-items: center; gap: 8px">
+            <h2 style="margin: 0; font-size: 15px; font-weight: 800; flex-grow: 1">{{cur.name}}</h2>
+            <button onClick="{{moveUp}}" aria-label="Выше" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: #22222B; color: #F4F4F6; display: flex; align-items: center; justify-content: center; cursor: pointer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"></path></svg>
+            </button>
+            <button onClick="{{moveDown}}" aria-label="Ниже" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: #22222B; color: #F4F4F6; display: flex; align-items: center; justify-content: center; cursor: pointer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+            </button>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A8A96">Если</div>
+          <sc-for list="{{cur.conds}}" as="c" hint-placeholder-count="2">
+            <div style="display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: #0F0F14; border: 1px solid #22222B">
+              <button style="display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid #2A2A34; background: #17171D; color: #F4F4F6; font-size: 13px; font-weight: 600; cursor: pointer">
+                {{c.label}}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8A96" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+              </button>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px">
+                <sc-for list="{{c.values}}" as="v" hint-placeholder-count="2">
+                  <span style="height: 26px; padding: 0 8px; border-radius: 6px; background: #22222B; font-family: 'JetBrains Mono', monospace; font-size: 12px; display: inline-flex; align-items: center">{{v}}</span>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+          <button style="height: 34px; border-radius: 10px; border: 1px dashed #3A3A46; background: transparent; color: #B4B4BE; font-size: 13px; font-weight: 600; cursor: pointer">+ Условие</button>
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A8A96">То</div>
+          <div role="radiogroup" aria-label="Действие" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border-radius: 10px; background: #0F0F14; gap: 3px">
+            <sc-for list="{{actions}}" as="a" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{a.on}}" onClick="{{a.pick}}" style="{{a.style}}">{{a.label}}</button>
+            </sc-for>
+          </div>
+        </aside>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C8FF4D","options":["#C8FF4D","#FF7AD9","#5CE1FF","#FF9F43"]},"startMode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1040,"height":680}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      mode: props.startMode ?? 'simple',
+      def: 'proxy',
+      drafts: { proxy: '', direct: '', block: '' },
+      items: {
+        proxy: ['youtube.com', 'chatgpt.com', 'instagram.com', 'telegram', 'list:Заблокированное в РФ'],
+        direct: ['gosuslugi.ru', 'sberbank.ru', 'steam.exe', '192.168.0.0/16', 'list:Российские сайты'],
+        block: ['doubleclick.net', 'list:Реклама']
+      },
+      sel: 2,
+      rules: [
+        { name: 'DNS', summary: 'протокол: dns', action: 'dns', on: true, conds: [{ label: 'Протокол', values: ['dns'] }] },
+        { name: 'Локальная сеть', summary: 'частные IP', action: 'direct', on: true, conds: [{ label: 'IP — частная сеть', values: ['да'] }] },
+        { name: 'Российские сайты', summary: 'rule-set: geoip-ru, geosite-ru, geosite-category-ru', action: 'direct', on: true, conds: [{ label: 'Список (rule-set)', values: ['geoip-ru', 'geosite-ru', 'geosite-category-ru'] }] },
+        { name: 'Работа через VPN', summary: 'сайт оканчивается на: corp.example.com, jira.example.com', action: 'proxy', on: true, conds: [{ label: 'Сайт оканчивается на', values: ['corp.example.com', 'jira.example.com'] }] },
+        { name: 'Игры', summary: 'программа: steam.exe, cs2', action: 'direct', on: false, conds: [{ label: 'Программа', values: ['steam.exe', 'cs2'] }, { label: 'Порт', values: ['27015-27050'] }] }
+      ]
+    };
+  }
+  kindOf(v) {
+    if (v.startsWith('list:')) return 'СПИСОК';
+    if (/^\d{1,3}(\.\d{1,3}){3}(\/\d+)?$/.test(v) || v.includes(':') && /^[0-9a-f:\/]+$/i.test(v)) return 'IP';
+    if (v.endsWith('.exe') || !v.includes('.')) return 'ПРОГ';
+    return 'САЙТ';
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#C8FF4D';
+    const s = this.state;
+    const seg = (on, small) => (small ? 'height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12px; ' : 'height: 32px; padding: 0 14px; border-radius: 9px; font-size: 13px; ') +
+      'border: none; font-weight: 700; cursor: pointer; ' + (on ? 'background: ' + accent + '; color: #0E0E12;' : 'background: transparent; color: #B4B4BE;');
+    const kindColors = { 'САЙТ': '#9DB8FF', 'IP': '#8FE3F2', 'ПРОГ': '#FFC98A', 'СПИСОК': '#C9B8FF' };
+    const meta = { proxy: ['Через VPN', accent], direct: ['Напрямую', '#9DB8FF'], block: ['Блокировать', '#FF6B6B'] };
+    const buckets = ['proxy', 'direct', 'block'].map((k) => ({
+      title: meta[k][0], color: meta[k][1], count: s.items[k].length, draft: s.drafts[k],
+      onInput: (e) => this.setState({ drafts: { ...s.drafts, [k]: e.target.value } }),
+      add: () => {
+        const v = (s.drafts[k] || '').trim();
+        if (!v) return;
+        this.setState({ items: { ...s.items, [k]: [...s.items[k], v] }, drafts: { ...s.drafts, [k]: '' } });
+      },
+      items: s.items[k].map((v, i) => {
+        const kind = this.kindOf(v);
+        return {
+          kind, kindColor: kindColors[kind], value: v.replace(/^list:/, ''),
+          remove: () => this.setState({ items: { ...s.items, [k]: s.items[k].filter((_, j) => j !== i) } })
+        };
+      })
+    }));
+    const lists = [['Заблокированное в РФ', 'proxy'], ['Российские сайты', 'direct'], ['Реклама', 'block'], ['Стриминг', 'proxy']].map(([label, k]) => ({
+      label, add: () => this.setState({ items: { ...s.items, [k]: [...s.items[k], 'list:' + label] } })
+    }));
+    const actionMeta = { proxy: ['VPN', accent, '#0E0E12'], direct: ['Напрямую', '#22222B', '#9DB8FF'], block: ['Блок', 'rgba(255,107,107,0.14)', '#FF8A8A'], dns: ['DNS', '#22222B', '#C9B8FF'] };
+    const pill = (a) => 'height: 24px; padding: 0 9px; border-radius: 7px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0; background: ' + actionMeta[a][1] + '; color: ' + actionMeta[a][2];
+    const rules = s.rules.map((r, i) => {
+      const sel = i === s.sel;
+      return {
+        n: i + 1, name: r.name, summary: r.summary, actionLabel: actionMeta[r.action][0], pill: pill(r.action),
+        sel: sel ? 'true' : 'false', onStr: r.on ? 'true' : 'false', nameColor: r.on ? '#F4F4F6' : '#8A8A96',
+        rowStyle: 'display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 12px; border-radius: 12px; box-sizing: border-box; ' +
+          (sel ? 'background: #1C1C24; border: 1.5px solid ' + accent + ';' : 'background: #15151B; border: 1.5px solid #22222B;') + (r.on ? '' : ' opacity: 0.7;'),
+        switchTrack: 'width: 40px; height: 24px; border-radius: 12px; border: none; padding: 0; position: relative; cursor: pointer; flex-shrink: 0; background: ' + (r.on ? accent : '#2A2A34'),
+        switchKnob: 'position: absolute; top: 3px; left: ' + (r.on ? '19px' : '3px') + '; width: 18px; height: 18px; border-radius: 50%; transition: left 200ms ease; background: ' + (r.on ? '#0E0E12' : '#8A8A96'),
+        select: () => this.setState({ sel: i }),
+        toggle: () => this.setState({ rules: s.rules.map((x, j) => (j === i ? { ...x, on: !x.on } : x)) })
+      };
+    });
+    const cur = s.rules[s.sel];
+    const move = (d) => () => {
+      const j = s.sel + d;
+      if (j < 0 || j >= s.rules.length) return;
+      const next = [...s.rules];
+      [next[s.sel], next[j]] = [next[j], next[s.sel]];
+      this.setState({ rules: next, sel: j });
+    };
+    const actions = ['proxy', 'direct', 'block'].map((a) => ({
+      label: actionMeta[a][0], on: cur.action === a ? 'true' : 'false',
+      pick: () => this.setState({ rules: s.rules.map((x, j) => (j === s.sel ? { ...x, action: a } : x)) }),
+      style: seg(cur.action === a, true) + ' padding: 0;'
+    }));
+    return {
+      accent, buckets, lists, rules, actions,
+      cur: { name: cur.name, conds: cur.conds },
+      isSimple: s.mode === 'simple', isAdv: s.mode === 'advanced',
+      simpleOn: s.mode === 'simple' ? 'true' : 'false', advOn: s.mode === 'advanced' ? 'true' : 'false',
+      simpleTab: seg(s.mode === 'simple'), advTab: seg(s.mode === 'advanced'),
+      toSimple: () => this.setState({ mode: 'simple' }), toAdv: () => this.setState({ mode: 'advanced' }),
+      defProxyOn: s.def === 'proxy' ? 'true' : 'false', defDirectOn: s.def === 'direct' ? 'true' : 'false',
+      defProxyStyle: seg(s.def === 'proxy', true), defDirectStyle: seg(s.def === 'direct', true),
+      defProxy: () => this.setState({ def: 'proxy' }), defDirect: () => this.setState({ def: 'direct' }),
+      defaultLabel: s.def === 'proxy' ? 'VPN' : 'Напрямую', defaultPill: pill(s.def),
+      moveUp: move(-1), moveDown: move(1),
+      addRule: () => this.setState({ rules: [...s.rules, { name: 'Новое правило', summary: 'нет условий', action: 'proxy', on: true, conds: [{ label: 'Сайт оканчивается на', values: [] }] }], sel: s.rules.length })
+    };
+  }
+}
+</script>
+</body>
+</html>
