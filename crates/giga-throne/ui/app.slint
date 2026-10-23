@@ -1,0 +1,24 @@
+import { Theme } from "theme.slint";
+import { NavRail } from "components/nav-rail.slint";
+import { HomeScreen } from "screens/home.slint";
+
+export { Theme }
+
+export component AppWindow inherits Window {
+    title: "giga-throne";
+    preferred-width: 1040px;
+    preferred-height: 680px;
+    min-width: 1040px;
+    min-height: 680px;
+    background: Theme.bg;
+    no-frame: false;
+
+    HorizontalLayout {
+        NavRail {
+        }
+
+        HomeScreen {
+            horizontal-stretch: 1;
+        }
+    }
+}

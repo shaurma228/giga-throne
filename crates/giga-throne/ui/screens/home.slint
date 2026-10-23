@@ -1,0 +1,83 @@
+import { Theme } from "../theme.slint";
+
+// Main screen: connection status, the big connect button and the session timer.
+export component HomeScreen inherits Rectangle {
+    in-out property <bool> connected: false;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 28px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                height: 32px;
+                width: chip.preferred-width + 32px;
+                border-radius: 16px;
+                background: Theme.raised;
+
+                chip := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.connected ? "Защищено" : "Не защищено";
+                    color: root.connected ? Theme.ping-ok : Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: center;
+
+            TouchArea {
+                width: 196px;
+                height: 196px;
+                clicked => {
+                    root.connected = !root.connected;
+                }
+
+                Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    border-radius: parent.width / 2;
+                    background: root.connected ? Theme.accent : Theme.connect-off;
+                    border-width: root.connected ? 0px : 2px;
+                    border-color: Theme.line;
+
+                    animate background {
+                        duration: Theme.anim;
+                        easing: ease-out;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: root.connected ? "Отключить" : "Подключить";
+                        color: root.connected ? Theme.on-accent : Theme.text;
+                        font-family: Theme.font-display;
+                        font-size: 16px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: center;
+
+            Text {
+                text: "00:00:00";
+                color: Theme.text;
+                font-family: Theme.font-mono;
+                font-size: 32px;
+            }
+        }
+    }
+}

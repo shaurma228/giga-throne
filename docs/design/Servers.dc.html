@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>giga-throne — серверы</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&amp;family=Manrope:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#C8FF4D}a:hover{color:#E2FF9A}
+button,input{font-family:inherit}
+input::placeholder{color:#8A8A96}
+</style>
+</helmet>
+<div style="width: 1040px; height: 680px; box-sizing: border-box; display: flex; background: #0E0E12; color: #F4F4F6; font-family: Manrope, system-ui, sans-serif; overflow: hidden; border-radius: 20px">
+
+  <nav aria-label="Разделы" style="width: 72px; flex-shrink: 0; background: #121217; border-right: 1px solid #1F1F27; display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 8px; box-sizing: border-box">
+    <div style="width: 40px; height: 40px; border-radius: 12px; background: {{accent}}; color: #0E0E12; display: flex; align-items: center; justify-content: center; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 15px; margin-bottom: 16px">gt</div>
+    <a href="Main.dc.html" aria-label="Главная" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Серверы" style="width: 44px; height: 44px; border-radius: 12px; background: #22222B; color: {{accent}}; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Правила" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18"></path><path d="M6 9a6 6 0 0 0 6 6h6"></path><path d="M15 12l3 3-3 3"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Статистика" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11"></path><path d="M12 20V4"></path><path d="M19 20v-6"></path></svg>
+    </a>
+    <div style="flex-grow: 1"></div>
+    <a href="Import.dc.html" aria-label="Добавить сервер" style="width: 44px; height: 44px; border-radius: 12px; border: 1px dashed #3A3A46; color: #F4F4F6; display: flex; align-items: center; justify-content: center; box-sizing: border-box">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+    </a>
+    <a href="Servers.dc.html" aria-label="Настройки" style="width: 44px; height: 44px; border-radius: 12px; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9"></path><path d="M19 7h1"></path><circle cx="16" cy="7" r="2.5"></circle><path d="M4 17h3"></path><path d="M13 17h7"></path><circle cx="10" cy="17" r="2.5"></circle></svg>
+    </a>
+  </nav>
+
+  <main style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0; padding: 0 28px 24px; box-sizing: border-box; gap: 16px">
+    <header style="height: 52px; display: flex; align-items: center; justify-content: space-between; margin: 0 -8px 0 0">
+      <div style="font-family: Unbounded, sans-serif; font-weight: 500; font-size: 13px; color: #8A8A96">giga-throne</div>
+      <div style="display: flex; gap: 6px">
+        <button aria-label="Свернуть" style="width: 28px; height: 28px; border-radius: 8px; border: none; background: transparent; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg>
+        </button>
+        <button aria-label="Закрыть в трей" style="width: 28px; height: 28px; border-radius: 8px; border: none; background: transparent; color: #8A8A96; display: flex; align-items: center; justify-content: center">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+    </header>
+
+    <div style="display: flex; align-items: center; gap: 12px">
+      <h1 style="margin: 0; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 26px; flex-grow: 1">Серверы</h1>
+      <label style="display: flex; align-items: center; gap: 8px; height: 40px; width: 240px; padding: 0 12px; border-radius: 12px; background: #17171D; border: 1px solid #262630; box-sizing: border-box; color: #8A8A96">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+        <input type="search" placeholder="Город, протокол…" aria-label="Поиск сервера" style="flex-grow: 1; min-width: 0; border: none; background: transparent; color: #F4F4F6; font-size: 14px; outline: none">
+      </label>
+      <button onClick="{{testAll}}" style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid #2A2A34; background: transparent; color: #F4F4F6; font-size: 14px; font-weight: 600; cursor: pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>{{testLabel}}</button>
+      <a href="Import.dc.html" style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 12px; background: {{accent}}; color: #0E0E12; font-size: 14px; font-weight: 700; text-decoration: none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Добавить</a>
+    </div>
+
+    <div role="tablist" aria-label="Группы" style="display: flex; gap: 8px">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+        <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}} <span style="opacity: 0.6; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{t.count}}</span></button>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{showSub}}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 16px; background: #15151B; border: 1px solid #22222B">
+        <div style="width: 40px; height: 40px; border-radius: 12px; background: #22222B; display: flex; align-items: center; justify-content: center; color: {{accent}}; flex-shrink: 0">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"></path><path d="M20 4v5h-5"></path><path d="M20 12a8 8 0 0 1-14 5.3L4 15"></path><path d="M4 20v-5h5"></path></svg>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1; min-width: 0">
+          <div style="display: flex; justify-content: space-between; font-size: 13px">
+            <span style="font-weight: 700">Моя подписка <span style="color: #8A8A96; font-weight: 500">· обновлено 2 ч назад</span></span>
+            <span style="font-family: 'JetBrains Mono', monospace; color: #B4B4BE">128 / 500 ГБ · до 14 ноя</span>
+          </div>
+          <div style="height: 6px; border-radius: 3px; background: #26262F; overflow: hidden">
+            <div style="width: 26%; height: 6px; border-radius: 3px; background: {{accent}}"></div>
+          </div>
+        </div>
+        <button style="height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid #2A2A34; background: transparent; color: #F4F4F6; font-size: 13px; font-weight: 600; cursor: pointer">Обновить</button>
+      </div>
+    </sc-if>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+      <sc-for list="{{cards}}" as="s" hint-placeholder-count="9">
+        <button onClick="{{s.pick}}" aria-pressed="{{s.sel}}" style="{{s.style}}">
+          <span style="display: flex; align-items: center; gap: 10px; width: 100%">
+            <span style="width: 34px; height: 34px; border-radius: 10px; background: #26262F; display: flex; align-items: center; justify-content: center; font-family: Unbounded, sans-serif; font-weight: 700; font-size: 11px; color: #F4F4F6; flex-shrink: 0">{{s.code}}</span>
+            <span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0; text-align: left">
+              <span style="font-weight: 700; font-size: 15px; color: #F4F4F6">{{s.city}}</span>
+              <span style="font-size: 12px; color: #8A8A96">{{s.transport}}</span>
+            </span>
+          </span>
+          <span style="display: flex; align-items: center; justify-content: space-between; width: 100%">
+            <span style="{{s.tagStyle}}">{{s.proto}}</span>
+            <span style="display: flex; align-items: center; gap: 8px">
+              <span style="display: flex; align-items: flex-end; gap: 2px; height: 14px" aria-hidden="true"><span style="{{s.b1}}"></span><span style="{{s.b2}}"></span><span style="{{s.b3}}"></span></span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #B4B4BE">{{s.pingText}}</span>
+            </span>
+          </span>
+        </button>
+      </sc-for>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#C8FF4D","options":["#C8FF4D","#FF7AD9","#5CE1FF","#FF9F43"]},"$preview":{"width":1040,"height":680}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'all', sel: 'NL1', testing: false };
+  }
+  componentWillUnmount() { clearTimeout(this.wait); }
+  renderVals() {
+    const accent = this.props.accent ?? '#C8FF4D';
+    const { tab, sel, testing } = this.state;
+    const tags = {
+      VLESS: ['#9DB8FF', 'rgba(157,184,255,0.12)'], HY2: ['#FFB0E6', 'rgba(255,176,230,0.12)'],
+      TUIC: ['#8FE3F2', 'rgba(143,227,242,0.12)'], TROJAN: ['#FFC98A', 'rgba(255,201,138,0.12)'],
+      SS: ['#C9B8FF', 'rgba(201,184,255,0.12)'], WG: ['#A8F0C0', 'rgba(168,240,192,0.12)']
+    };
+    const all = [
+      { id: 'NL1', g: 'sub', code: 'NL', city: 'Амстердам', proto: 'VLESS', transport: 'Reality · TCP', ping: 38 },
+      { id: 'DE1', g: 'sub', code: 'DE', city: 'Франкфурт', proto: 'HY2', transport: 'QUIC · Salamander', ping: 44 },
+      { id: 'FI1', g: 'sub', code: 'FI', city: 'Хельсинки', proto: 'VLESS', transport: 'XHTTP · TLS', ping: 52 },
+      { id: 'TR1', g: 'sub', code: 'TR', city: 'Стамбул', proto: 'TUIC', transport: 'QUIC · BBR', ping: 71 },
+      { id: 'PL1', g: 'sub', code: 'PL', city: 'Варшава', proto: 'VLESS', transport: 'gRPC · TLS', ping: 63 },
+      { id: 'US1', g: 'sub', code: 'US', city: 'Нью-Йорк', proto: 'TROJAN', transport: 'WS · TLS', ping: 128 },
+      { id: 'JP1', g: 'manual', code: 'JP', city: 'Токио', proto: 'SS', transport: '2022-blake3', ping: 214 },
+      { id: 'SE1', g: 'manual', code: 'SE', city: 'Стокгольм', proto: 'HY2', transport: 'QUIC', ping: 58 },
+      { id: 'CF1', g: 'warp', code: 'CF', city: 'Cloudflare WARP', proto: 'WG', transport: 'WireGuard', ping: 21 }
+    ];
+    const tabDefs = [['all', 'Все'], ['sub', 'Моя подписка'], ['manual', 'Ручные'], ['warp', 'WARP']];
+    const tabs = tabDefs.map(([id, label]) => ({
+      label, on: tab === id ? 'true' : 'false',
+      count: id === 'all' ? all.length : all.filter((s) => s.g === id).length,
+      pick: () => this.setState({ tab: id }),
+      style: 'height: 36px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer; ' +
+        (tab === id ? 'background: #F4F4F6; color: #0E0E12; border: 1px solid #F4F4F6;' : 'background: transparent; color: #B4B4BE; border: 1px solid #2A2A34;')
+    }));
+    const bar = (h, lit, col) => 'width: 3px; height: ' + h + 'px; border-radius: 1px; background: ' + (lit ? col : '#33333E');
+    const cards = all.filter((s) => tab === 'all' || s.g === tab).map((s) => {
+      const lvl = testing ? 0 : s.ping < 60 ? 3 : s.ping < 150 ? 2 : 1;
+      const col = lvl === 3 ? '#9BE564' : lvl === 2 ? '#FFB547' : '#FF6B6B';
+      const isSel = s.id === sel;
+      const t = tags[s.proto];
+      return {
+        ...s, sel: isSel ? 'true' : 'false',
+        pingText: testing ? '… мс' : s.ping + ' мс',
+        b1: bar(6, lvl >= 1, col), b2: bar(10, lvl >= 2, col), b3: bar(14, lvl >= 3, col),
+        tagStyle: 'height: 22px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; letter-spacing: 0.05em; color: ' + t[0] + '; background: ' + t[1],
+        style: 'display: flex; flex-direction: column; gap: 14px; padding: 14px; border-radius: 16px; cursor: pointer; text-align: left; box-sizing: border-box; font-family: inherit; ' +
+          (isSel ? 'background: #1C1C24; border: 1.5px solid ' + accent + ';' : 'background: #15151B; border: 1.5px solid #22222B;'),
+        pick: () => this.setState({ sel: s.id })
+      };
+    });
+    return {
+      accent, tabs, cards,
+      showSub: tab === 'all' || tab === 'sub',
+      testLabel: testing ? 'Тестим…' : 'Тест пинга',
+      testAll: () => {
+        if (testing) return;
+        this.setState({ testing: true });
+        this.wait = setTimeout(() => this.setState({ testing: false }), 1400);
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

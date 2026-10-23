@@ -1,0 +1,67 @@
+import { Theme } from "../theme.slint";
+
+// Left navigation column: logo and section switcher.
+export component NavRail inherits Rectangle {
+    width: 72px;
+    background: Theme.panel;
+
+    in-out property <int> active: 0;
+
+    VerticalLayout {
+        padding-top: 16px;
+        padding-bottom: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: Theme.radius-s;
+                background: Theme.accent;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "gt";
+                    color: Theme.on-accent;
+                    font-family: Theme.font-display;
+                    font-size: 16px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        for label[i] in ["Дом", "Серв", "Прав", "Стат"]: HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: 44px;
+                height: 44px;
+                border-radius: Theme.radius-s;
+                background: root.active == i ? Theme.raised : transparent;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: label;
+                    color: root.active == i ? Theme.accent : Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.active = i;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,7 @@
+/target
+/sidecar/*
+!/sidecar/README.md
+*.pprof
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,51 @@
+// Design tokens for giga-throne. Source of truth: CLAUDE.md ("Дизайн").
+// Screens and components must reference these tokens instead of hardcoded colors.
+
+export global Theme {
+    // Surfaces
+    out property <color> bg: #0E0E12;
+    out property <color> surface: #17171D;
+    out property <color> panel: #121217;
+    out property <color> raised: #22222B;
+    out property <color> line: #2A2A34;
+    out property <color> connect-off: #1C1C24;
+
+    // Text
+    out property <color> text: #F4F4F6;
+    out property <color> text-2: #B4B4BE;
+    out property <color> muted: #8A8A96;
+
+    // Accent (user-selectable at runtime)
+    in-out property <color> accent: #C8FF4D;
+    out property <color> on-accent: #0E0E12;
+    out property <color> accent-pink: #FF7AD9;
+    out property <color> accent-cyan: #5CE1FF;
+    out property <color> accent-orange: #FF9F43;
+
+    // Ping status
+    out property <color> ping-ok: #9BE564;
+    out property <color> ping-mid: #FFB547;
+    out property <color> ping-bad: #FF6B6B;
+
+    // Protocol tags (text color; background is the same color at 12% alpha)
+    out property <color> proto-vless: #9DB8FF;
+    out property <color> proto-hy2: #FFB0E6;
+    out property <color> proto-tuic: #8FE3F2;
+    out property <color> proto-trojan: #FFC98A;
+    out property <color> proto-ss: #C9B8FF;
+    out property <color> proto-wg: #A8F0C0;
+
+    // Radii
+    out property <length> radius-s: 10px;
+    out property <length> radius-m: 14px;
+    out property <length> radius-l: 20px;
+
+    // Fonts
+    out property <string> font-display: "Unbounded";
+    out property <string> font-body: "Manrope";
+    out property <string> font-mono: "JetBrains Mono";
+
+    // Animation
+    out property <duration> anim-fast: 150ms;
+    out property <duration> anim: 250ms;
+}
