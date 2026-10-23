@@ -98,7 +98,7 @@ impl Sidecar {
 
         Ok(SidecarHandle {
             inner: Arc::new(Inner {
-                client: Arc::new(Client::new(addr, key)),
+                client: Arc::new(Client::new(addr, key).request_timeout(Duration::from_secs(75))),
                 state: state_rx,
                 stop: stop_tx,
                 done: done_rx,
@@ -124,7 +124,6 @@ struct Inner {
 
 impl SidecarHandle {
     /// The shared API client, configured with our port and key.
-    #[allow(dead_code)] // used once the app layer calls the API
     pub fn client(&self) -> Arc<Client> {
         Arc::clone(&self.inner.client)
     }

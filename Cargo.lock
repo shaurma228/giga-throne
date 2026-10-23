@@ -1620,6 +1620,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "directories",
+ "serde_json",
  "slint",
  "slint-build",
  "tempfile",

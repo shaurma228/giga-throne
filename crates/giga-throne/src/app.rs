@@ -7,11 +7,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 use slint::ComponentHandle;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time::timeout;
 use tracing::warn;
 
+use crate::engine::{self, Command, Engine};
 use crate::sidecar::{Sidecar, SidecarConfig, SidecarHandle, SidecarState};
+use crate::view;
 use crate::AppWindow;
 
 /// Upper bound for stopping the engine when the window closes.
@@ -32,19 +35,28 @@ pub fn engine_status_text(state: &SidecarState) -> String {
 /// Starts the engine on `runtime` without blocking the caller, and keeps the
 /// engine status line of `window` up to date.
 ///
+/// Once the sidecar exists, the engine controller runs `commands` against it.
 /// The receiver yields the handle once the engine has been started, so that
 /// [`stop_engine`] can shut it down. If the start fails, the error is shown in
 /// the status line and the receiver is closed.
 pub fn start_engine(
     runtime: &tokio::runtime::Runtime,
     window: &AppWindow,
+    commands: UnboundedReceiver<Command>,
 ) -> oneshot::Receiver<SidecarHandle> {
     let (handle_tx, handle_rx) = oneshot::channel();
     let weak = window.as_weak();
     runtime.spawn(async move {
         match launch().await {
-            Ok(handle) => {
-                tokio::spawn(watch_status(weak, handle.state()));
+            Ok((handle, api_port)) => {
+                tokio::spawn(watch_status(weak.clone(), handle.state()));
+                let sink_weak = weak.clone();
+                let engine = Engine::new(
+                    handle.client(),
+                    api_port,
+                    Box::new(move |frame| view::push(&sink_weak, frame)),
+                );
+                tokio::spawn(engine::run(engine, handle.state(), commands));
                 // Only fails if `stop_engine` is already gone; the handle is then
                 // dropped, which stops the engine too.
                 let _ = handle_tx.send(handle);
@@ -70,9 +82,12 @@ pub fn stop_engine(runtime: &tokio::runtime::Runtime, handle_rx: oneshot::Receiv
     }
 }
 
-async fn launch() -> Result<SidecarHandle> {
+/// Starts the sidecar. Returns the handle and our API port.
+async fn launch() -> Result<(SidecarHandle, u16)> {
     let config = SidecarConfig::from_env()?;
-    Sidecar::start(config).await
+    let port = config.port;
+    let handle = Sidecar::start(config).await?;
+    Ok((handle, port))
 }
 
 /// Mirrors every state change into the status line until the engine is dropped.

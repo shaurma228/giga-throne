@@ -1,8 +1,9 @@
 import { Theme } from "theme.slint";
 import { NavRail } from "components/nav-rail.slint";
+import { ServerList, ServerItem } from "components/server-list.slint";
 import { HomeScreen } from "screens/home.slint";
 
-export { Theme }
+export { Theme, ServerItem }
 
 export component AppWindow inherits Window {
     title: "giga-throne";
@@ -15,6 +16,29 @@ export component AppWindow inherits Window {
 
     in property <string> engine-status: "Движок запускается…";
 
+    // Home screen state, set from Rust (src/view.rs).
+    in-out property <string> conn-state: "off";
+    in-out property <string> status-text: "Не защищено";
+    in-out property <string> timer: "00:00:00";
+    in-out property <string> hint;
+    in-out property <string> server-name: "Нет серверов";
+    in-out property <string> server-code: "··";
+    in-out property <string> server-proto;
+    in-out property <string> server-ping: "—";
+    in-out property <string> down-rate: "—";
+    in-out property <string> up-rate: "—";
+    in-out property <string> inbound-text: "—";
+    in-out property <string> error-text;
+
+    // Server list state, set from Rust.
+    in-out property <[ServerItem]> servers;
+    in-out property <string> import-text;
+    in-out property <string> import-result;
+
+    callback toggle();
+    callback pick(int);
+    callback import-link(string);
+
     HorizontalLayout {
         NavRail {
         }
@@ -22,6 +46,33 @@ export component AppWindow inherits Window {
         HomeScreen {
             horizontal-stretch: 1;
             engine-status: root.engine-status;
+            conn-state <=> root.conn-state;
+            status-text <=> root.status-text;
+            timer <=> root.timer;
+            hint <=> root.hint;
+            server-name <=> root.server-name;
+            server-code <=> root.server-code;
+            server-proto <=> root.server-proto;
+            server-ping <=> root.server-ping;
+            down-rate <=> root.down-rate;
+            up-rate <=> root.up-rate;
+            inbound-text <=> root.inbound-text;
+            error-text <=> root.error-text;
+            toggle => {
+                root.toggle();
+            }
+        }
+
+        ServerList {
+            servers <=> root.servers;
+            import-text <=> root.import-text;
+            import-result <=> root.import-result;
+            import-link(text) => {
+                root.import-link(text);
+            }
+            pick(id) => {
+                root.pick(id);
+            }
         }
     }
 }

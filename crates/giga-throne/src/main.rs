@@ -1,7 +1,9 @@
 //! giga-throne: desktop UI for the Throne engine.
 
 mod app;
+mod engine;
 mod sidecar;
+mod view;
 
 use anyhow::Context;
 use tracing_subscriber::EnvFilter;
@@ -18,7 +20,8 @@ fn main() -> anyhow::Result<()> {
         .context("starting the async runtime")?;
 
     let window = AppWindow::new()?;
-    let engine = app::start_engine(&runtime, &window);
+    let commands = engine::bind_callbacks(&window);
+    let engine = app::start_engine(&runtime, &window, commands);
     let result = window.run();
     app::stop_engine(&runtime, engine);
     result?;

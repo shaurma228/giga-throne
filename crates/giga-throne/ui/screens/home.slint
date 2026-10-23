@@ -1,98 +1,327 @@
 import { Theme } from "../theme.slint";
 
-// Main screen: connection status, the big connect button and the session timer.
+// Main screen: connection status, the connect button, the current server and the stat tiles.
+// All texts come from Rust (see src/view.rs); this file only lays them out.
 export component HomeScreen inherits Rectangle {
-    in-out property <bool> connected: false;
+    // "off", "busy" or "on"
+    in-out property <string> conn-state: "off";
+    in-out property <string> status-text: "Не защищено";
+    in-out property <string> timer: "00:00:00";
+    in-out property <string> hint;
+    in-out property <string> server-name: "Нет серверов";
+    in-out property <string> server-code: "··";
+    in-out property <string> server-proto;
+    in-out property <string> server-ping: "—";
+    in-out property <string> down-rate: "—";
+    in-out property <string> up-rate: "—";
+    in-out property <string> inbound-text: "—";
+    in-out property <string> error-text;
     in property <string> engine-status;
 
+    callback toggle();
+
     VerticalLayout {
-        alignment: center;
-        spacing: 28px;
-
-        HorizontalLayout {
+        // Main column: centered content, takes the free height.
+        VerticalLayout {
+            vertical-stretch: 1;
             alignment: center;
+            spacing: 22px;
 
-            Rectangle {
-                height: 32px;
-                width: chip.preferred-width + 32px;
-                border-radius: 16px;
-                background: Theme.raised;
-
-                chip := Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.connected ? "Защищено" : "Не защищено";
-                    color: root.connected ? Theme.ping-ok : Theme.muted;
-                    font-family: Theme.font-body;
-                    font-size: 13px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        HorizontalLayout {
-            alignment: center;
-
-            TouchArea {
-                width: 196px;
-                height: 196px;
-                clicked => {
-                    root.connected = !root.connected;
-                }
+            HorizontalLayout {
+                alignment: center;
 
                 Rectangle {
-                    width: parent.width;
-                    height: parent.height;
-                    border-radius: parent.width / 2;
-                    background: root.connected ? Theme.accent : Theme.connect-off;
-                    border-width: root.connected ? 0px : 2px;
-                    border-color: Theme.line;
+                    height: 28px;
+                    width: chip-text.preferred-width + 40px;
+                    border-radius: 14px;
+                    background: root.conn-state == "on" ? Theme.accent.with-alpha(0.14)
+                        : root.conn-state == "busy" ? Theme.raised
+                        : Theme.ping-bad.with-alpha(0.12);
 
-                    animate background {
-                        duration: Theme.anim;
-                        easing: ease-out;
+                    chip-dot := Rectangle {
+                        x: 12px;
+                        y: (parent.height - self.height) / 2;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: chip-text.color;
                     }
 
-                    Text {
-                        width: parent.width;
+                    chip-text := Text {
+                        x: 26px;
+                        width: parent.width - 26px - 12px;
                         height: parent.height;
-                        text: root.connected ? "Отключить" : "Подключить";
-                        color: root.connected ? Theme.on-accent : Theme.text;
-                        font-family: Theme.font-display;
-                        font-size: 16px;
+                        text: root.status-text;
+                        color: root.conn-state == "on" ? Theme.accent
+                            : root.conn-state == "busy" ? Theme.text-2
+                            : Theme.ping-bad;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
                         font-weight: 600;
-                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
             }
-        }
 
-        HorizontalLayout {
-            alignment: center;
+            HorizontalLayout {
+                alignment: center;
 
-            Text {
-                text: "00:00:00";
-                color: Theme.text;
-                font-family: Theme.font-mono;
-                font-size: 32px;
+                connect := Rectangle {
+                    width: 196px;
+                    height: 196px;
+
+                    // Soft accent ring, only while connected.
+                    Rectangle {
+                        x: -14px;
+                        y: -14px;
+                        width: parent.width + 28px;
+                        height: parent.height + 28px;
+                        border-radius: self.width / 2;
+                        background: root.conn-state == "on" ? Theme.accent.with-alpha(0.12) : transparent;
+                    }
+
+                    body := Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        border-radius: self.width / 2;
+                        background: root.conn-state == "on" ? Theme.accent : Theme.connect-off;
+                        border-width: root.conn-state == "on" ? 0px : 2px;
+                        border-color: root.conn-state == "busy" ? Theme.accent : Theme.line;
+
+                        animate background, border-color {
+                            duration: Theme.anim;
+                            easing: ease-out;
+                        }
+
+                        // Power icon, drawn in a 64px box.
+                        Path {
+                            width: 64px;
+                            height: 64px;
+                            commands: "M 32 8 L 32 29.3 M 16.8 18.1 A 21.3 21.3 0 1 0 47.2 18.1";
+                            stroke: root.conn-state == "on" ? Theme.on-accent
+                                : root.conn-state == "busy" ? Theme.accent
+                                : Theme.muted;
+                            stroke-width: 6px;
+                            fill: transparent;
+                        }
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            root.toggle();
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+
+                Text {
+                    text: root.timer;
+                    color: root.conn-state == "on" ? Theme.text : Theme.muted;
+                    font-family: Theme.font-mono;
+                    font-size: 32px;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: root.hint;
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // Current server pill.
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 320px;
+                    height: 52px;
+                    border-radius: 16px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.raised;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 16px;
+                        spacing: 12px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: Theme.radius-s;
+                            background: Theme.raised;
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: root.server-code;
+                                color: Theme.text;
+                                font-family: Theme.font-display;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+
+                            Text {
+                                text: root.server-name;
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 15px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: root.server-proto != "" ? root.server-proto + " · " + root.server-ping : root.server-ping;
+                                color: Theme.muted;
+                                font-family: Theme.font-body;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+
+                        Path {
+                            width: 18px;
+                            height: 18px;
+                            commands: "M 7 4 L 13 9 L 7 14";
+                            stroke: Theme.muted;
+                            stroke-width: 2px;
+                            fill: transparent;
+                        }
+                    }
+                }
+            }
+
+            if root.error-text != "" : Text {
+                text: root.error-text;
+                color: Theme.ping-bad;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                horizontal-alignment: center;
             }
         }
-    }
 
-    // Engine status line, pinned to the bottom center.
-    Text {
-        x: 0px;
-        y: root.height - 40px;
-        width: root.width;
-        height: 20px;
-        text: root.engine-status;
-        color: Theme.muted;
-        font-family: Theme.font-body;
-        font-size: 12px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+        // Stat tiles: download, upload, local inbound.
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-bottom: 12px;
+            spacing: 12px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 84px;
+                border-radius: Theme.radius-m;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.raised;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "Загрузка";
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: root.down-rate;
+                        color: Theme.text;
+                        font-family: Theme.font-mono;
+                        font-size: 18px;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 84px;
+                border-radius: Theme.radius-m;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.raised;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "Отдача";
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: root.up-rate;
+                        color: Theme.text;
+                        font-family: Theme.font-mono;
+                        font-size: 18px;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 84px;
+                border-radius: Theme.radius-m;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.raised;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "Вход";
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: root.inbound-text;
+                        color: Theme.text;
+                        font-family: Theme.font-mono;
+                        font-size: 14px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        // Engine status line.
+        Text {
+            height: 24px;
+            text: root.engine-status;
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }
