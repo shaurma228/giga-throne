@@ -3,6 +3,8 @@
 //! Network calls run on tokio; results reach the UI through
 //! `slint::Weak::upgrade_in_event_loop`, so the UI thread never waits on them.
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -13,7 +15,9 @@ use tokio::time::timeout;
 use tracing::warn;
 
 use crate::engine::{self, Command, Engine};
+use crate::prefs;
 use crate::sidecar::{Sidecar, SidecarConfig, SidecarHandle, SidecarState};
+use crate::sysproxy::SystemProxy;
 use crate::view;
 use crate::AppWindow;
 
@@ -39,10 +43,15 @@ pub fn engine_status_text(state: &SidecarState) -> String {
 /// The receiver yields the handle once the engine has been started, so that
 /// [`stop_engine`] can shut it down. If the start fails, the error is shown in
 /// the status line and the receiver is closed.
+///
+/// `sysproxy` changes the desktop proxy on the engine's behalf; `data_root`
+/// holds the preferences.
 pub fn start_engine(
     runtime: &tokio::runtime::Runtime,
     window: &AppWindow,
     commands: UnboundedReceiver<Command>,
+    sysproxy: Arc<SystemProxy>,
+    data_root: PathBuf,
 ) -> oneshot::Receiver<SidecarHandle> {
     let (handle_tx, handle_rx) = oneshot::channel();
     let weak = window.as_weak();
@@ -55,6 +64,8 @@ pub fn start_engine(
                     handle.client(),
                     api_port,
                     Box::new(move |frame| view::push(&sink_weak, frame)),
+                    sysproxy,
+                    prefs::path(&data_root),
                 );
                 tokio::spawn(engine::run(engine, handle.state(), commands));
                 // Only fails if `stop_engine` is already gone; the handle is then

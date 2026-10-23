@@ -11,13 +11,14 @@
 //! Nothing runs until the sidecar reports [`SidecarState::Ready`]. Every
 //! transition to Ready re-checks the ports Throne listens on.
 
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use throne_api::types::{
-    ConnectionState, GetSettingsResponse, ImportResponse, LiveStatsResponse, Profile,
-    ProfilesResponse, SettingsMap, Status,
+    ConnectionState, GetSettingsResponse, ImportResponse, InboundStatus, LiveStatsResponse,
+    Profile, ProfilesResponse, SettingsMap, Status,
 };
 use throne_api::{Client, Error, Method};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -25,7 +26,9 @@ use tokio::sync::{watch, Notify};
 use tokio::time::{interval_at, sleep};
 use tracing::{debug, info, warn};
 
+use crate::prefs::{self, Prefs};
 use crate::sidecar::SidecarState;
+use crate::sysproxy::{proxy_host, SystemProxy};
 use crate::view::{home_view, server_row, Frame, HomeView, Pending, ServerRow};
 use crate::AppWindow;
 
@@ -43,6 +46,9 @@ const CONNECTION_WAIT_SECS: u64 = 30;
 
 /// Seconds Throne may take to import before answering 202.
 const IMPORT_WAIT_SECS: u64 = 60;
+
+/// Shown while the system proxy is wanted but Throne's local proxy is switched off.
+const INBOUND_OFF_TEXT: &str = "Локальный прокси выключен в настройках движка";
 
 /// Settings that name a loopback port Throne binds.
 const PORT_SETTINGS: [&str; 4] = [
@@ -64,6 +70,8 @@ pub enum Command {
     Connect(i64),
     /// Import what the user pasted.
     Import(String),
+    /// Flip the "Системный прокси" preference.
+    ToggleSystemProxy,
 }
 
 /// Connects the UI callbacks of `window` to commands. The receiver goes to [`run`].
@@ -76,6 +84,10 @@ pub fn bind_callbacks(window: &AppWindow) -> UnboundedReceiver<Command> {
     let pick = tx.clone();
     window.on_pick(move |id| {
         let _ = pick.send(Command::Connect(i64::from(id)));
+    });
+    let sysproxy = tx.clone();
+    window.on_toggle_sysproxy(move || {
+        let _ = sysproxy.send(Command::ToggleSystemProxy);
     });
     window.on_import_link(move |text| {
         let _ = tx.send(Command::Import(text.to_string()));
@@ -102,18 +114,36 @@ pub struct Engine {
     shared: Arc<Shared>,
     /// Wakes the poll loop after a command, so the lists refresh at once.
     wake: Notify,
+    /// The desktop proxy. Shared with the app, which restores it on exit.
+    sysproxy: Arc<SystemProxy>,
+    /// Where the preferences are saved.
+    prefs_path: PathBuf,
+    proxy_track: Mutex<ProxyTrack>,
 }
 
 impl Engine {
-    pub fn new(client: Arc<Client>, api_port: u16, sink: Sink) -> Arc<Self> {
+    pub fn new(
+        client: Arc<Client>,
+        api_port: u16,
+        sink: Sink,
+        sysproxy: Arc<SystemProxy>,
+        prefs_path: PathBuf,
+    ) -> Arc<Self> {
+        let prefs = prefs::load(&prefs_path);
         Arc::new(Self {
             client,
             api_port,
             shared: Arc::new(Shared {
-                state: Mutex::new(State::default()),
+                state: Mutex::new(State {
+                    prefs,
+                    ..State::default()
+                }),
                 sink,
             }),
             wake: Notify::new(),
+            sysproxy,
+            prefs_path,
+            proxy_track: Mutex::new(ProxyTrack::default()),
         })
     }
 
@@ -142,7 +172,11 @@ impl Engine {
                         if changed.is_err() {
                             return;
                         }
-                        // Left Ready or came back: re-check the ports and restart the loop.
+                        // Left Ready or came back: release the proxy if Throne is down,
+                        // re-check the ports and restart the loop.
+                        if !is_ready(&state.borrow()) {
+                            self.sync_system_proxy(None);
+                        }
                         break;
                     }
                 }
@@ -163,6 +197,7 @@ impl Engine {
                 } else {
                     None
                 };
+                self.sync_system_proxy(Some(&status));
                 self.shared.update(|st| {
                     st.set_status(status);
                     st.stats = stats;
@@ -196,8 +231,76 @@ impl Engine {
             Command::Toggle => self.report_connection(self.toggle().await),
             Command::Connect(id) => self.report_connection(self.connect(id).await),
             Command::Import(text) => self.import(&text).await,
+            Command::ToggleSystemProxy => self.toggle_system_proxy(),
         }
+        let status = self.shared.read(|st| st.status.clone());
+        self.sync_system_proxy(status.as_ref());
         self.wake.notify_one();
+    }
+
+    /// Flips the "Системный прокси" preference and saves it. The caller syncs the proxy.
+    pub fn toggle_system_proxy(&self) {
+        let prefs = Prefs {
+            system_proxy: !self.shared.read(|st| st.prefs.system_proxy),
+        };
+        if let Err(err) = prefs::save(&self.prefs_path, &prefs) {
+            warn!("could not save preferences: {err}");
+        }
+        self.shared.update(|st| st.prefs = prefs);
+    }
+
+    /// Makes the desktop proxy match the preference and the engine state.
+    ///
+    /// `status` is the engine's status, or `None` when the engine is not Ready. A
+    /// failing enable is shown once and not retried every second, only when the
+    /// wanted endpoint changes. Never blocks on the network.
+    pub fn sync_system_proxy(&self, status: Option<&Status>) {
+        let pref = self.shared.read(|st| st.prefs.system_proxy);
+        let state = status.map(|s| s.state);
+        let inbound = status.map(|s| &s.inbound);
+        let applied = self.sysproxy.applied();
+        let applied = applied.as_ref().map(|(host, port)| (host.as_str(), *port));
+        let action = proxy_action(state, pref, inbound, applied);
+
+        let mut track = self
+            .proxy_track
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if inbound_blocked(state, pref, inbound) {
+            if !track.blocked {
+                flash_error(&self.shared, INBOUND_OFF_TEXT.to_owned());
+            }
+            track.blocked = true;
+        } else {
+            track.blocked = false;
+        }
+
+        let enabling = matches!(action, ProxyAction::Enable { .. });
+        let result = match &action {
+            ProxyAction::Nothing => {
+                track.failed = None;
+                return;
+            }
+            ProxyAction::Enable { .. } if track.failed.as_ref() == Some(&action) => return,
+            ProxyAction::Enable { host, port } => self.sysproxy.enable(host, *port),
+            ProxyAction::Disable => self.sysproxy.disable(),
+        };
+        match result {
+            Ok(()) => track.failed = None,
+            Err(err) => {
+                warn!("system proxy change failed: {err:#}");
+                let verb = if enabling {
+                    "включить"
+                } else {
+                    "выключить"
+                };
+                flash_error(
+                    &self.shared,
+                    format!("Не удалось {verb} системный прокси: {err:#}"),
+                );
+                track.failed = Some(action);
+            }
+        }
     }
 
     fn report_connection(&self, result: Result<(), Error>) {
@@ -361,7 +464,13 @@ async fn command_loop(
     while let Some(command) = commands.recv().await {
         let ready = is_ready(&state.borrow());
         if !ready {
-            flash_error(&engine.shared, "Движок ещё не готов".to_owned());
+            if command == Command::ToggleSystemProxy {
+                // The switch is local: with no engine running, the proxy must be off.
+                engine.toggle_system_proxy();
+                engine.sync_system_proxy(None);
+            } else {
+                flash_error(&engine.shared, "Движок ещё не готов".to_owned());
+            }
             continue;
         }
         engine.handle(command).await;
@@ -412,6 +521,71 @@ fn flash(shared: &Arc<Shared>, target: Flash, text: String) {
     });
 }
 
+/// What the desktop proxy should be, given the engine state and the preference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProxyAction {
+    /// Point the desktop proxy at this endpoint, or move it there.
+    Enable { host: String, port: u16 },
+    /// Restore the desktop proxy.
+    Disable,
+    /// Leave it as it is.
+    Nothing,
+}
+
+/// Decides the desktop proxy from the engine state, the preference, Throne's
+/// inbound and the endpoint that is applied now.
+///
+/// The proxy is wanted only while Throne runs, the preference is on and the
+/// inbound is enabled. A different endpoint, such as a new port, is applied again.
+pub fn proxy_action(
+    state: Option<ConnectionState>,
+    pref: bool,
+    inbound: Option<&InboundStatus>,
+    applied: Option<(&str, u16)>,
+) -> ProxyAction {
+    match (wanted_endpoint(state, pref, inbound), applied) {
+        (Some((host, port)), Some((applied_host, applied_port)))
+            if host == applied_host && port == applied_port =>
+        {
+            ProxyAction::Nothing
+        }
+        (Some((host, port)), _) => ProxyAction::Enable { host, port },
+        (None, Some(_)) => ProxyAction::Disable,
+        (None, None) => ProxyAction::Nothing,
+    }
+}
+
+/// The endpoint the system proxy should use, when it is wanted at all.
+fn wanted_endpoint(
+    state: Option<ConnectionState>,
+    pref: bool,
+    inbound: Option<&InboundStatus>,
+) -> Option<(String, u16)> {
+    if !pref || state != Some(ConnectionState::Running) {
+        return None;
+    }
+    let inbound = inbound.filter(|inbound| inbound.enabled)?;
+    Some((proxy_host(&inbound.address), inbound.port))
+}
+
+/// Whether the proxy is wanted but Throne's local proxy is switched off.
+pub fn inbound_blocked(
+    state: Option<ConnectionState>,
+    pref: bool,
+    inbound: Option<&InboundStatus>,
+) -> bool {
+    pref && state == Some(ConnectionState::Running) && inbound.is_some_and(|i| !i.enabled)
+}
+
+/// What the last system proxy change did, so that a failure is not retried every second.
+#[derive(Default)]
+struct ProxyTrack {
+    /// The change that failed, retried only when the wanted endpoint changes.
+    failed: Option<ProxyAction>,
+    /// The "inbound is off" error is already on screen.
+    blocked: bool,
+}
+
 /// Engine state the UI shows. Guarded by a mutex; never held across an await.
 #[derive(Default)]
 struct State {
@@ -419,6 +593,7 @@ struct State {
     stats: Option<LiveStatsResponse>,
     profiles: Vec<Profile>,
     pending: Option<Pending>,
+    prefs: Prefs,
     /// Profile id and start time of the current session, while running.
     running_since: Option<(i64, Instant)>,
     error: String,
@@ -477,6 +652,7 @@ impl State {
             import_result: self.import_result.clone(),
             error: self.error.clone(),
             clear_import,
+            system_proxy: self.prefs.system_proxy,
         }
     }
 }
@@ -700,6 +876,99 @@ mod tests {
         assert!(import_request("   \n").is_none());
     }
 
+    fn inbound(enabled: bool, address: &str, port: u16) -> InboundStatus {
+        InboundStatus {
+            enabled,
+            address: address.to_owned(),
+            port,
+        }
+    }
+
+    #[test]
+    fn running_with_the_preference_wants_the_proxy_at_the_inbound() {
+        let on = inbound(true, "0.0.0.0", 2080);
+        assert_eq!(
+            proxy_action(Some(ConnectionState::Running), true, Some(&on), None),
+            ProxyAction::Enable {
+                host: "127.0.0.1".to_owned(),
+                port: 2080
+            }
+        );
+    }
+
+    #[test]
+    fn the_applied_endpoint_is_left_alone_and_a_new_port_moves_it() {
+        let on = inbound(true, "127.0.0.1", 2080);
+        let running = Some(ConnectionState::Running);
+        assert_eq!(
+            proxy_action(running, true, Some(&on), Some(("127.0.0.1", 2080))),
+            ProxyAction::Nothing
+        );
+        assert_eq!(
+            proxy_action(running, true, Some(&on), Some(("127.0.0.1", 1080))),
+            ProxyAction::Enable {
+                host: "127.0.0.1".to_owned(),
+                port: 2080
+            }
+        );
+    }
+
+    #[test]
+    fn leaving_running_or_turning_the_preference_off_restores_the_proxy() {
+        let on = inbound(true, "127.0.0.1", 2080);
+        let applied = Some(("127.0.0.1", 2080));
+        for state in [
+            Some(ConnectionState::Idle),
+            Some(ConnectionState::Stopping),
+            None,
+        ] {
+            assert_eq!(
+                proxy_action(state, true, Some(&on), applied),
+                ProxyAction::Disable
+            );
+        }
+        assert_eq!(
+            proxy_action(Some(ConnectionState::Running), false, Some(&on), applied),
+            ProxyAction::Disable
+        );
+    }
+
+    #[test]
+    fn nothing_is_done_when_nothing_is_applied_and_nothing_is_wanted() {
+        let on = inbound(true, "127.0.0.1", 2080);
+        assert_eq!(
+            proxy_action(Some(ConnectionState::Idle), true, Some(&on), None),
+            ProxyAction::Nothing
+        );
+        assert_eq!(
+            proxy_action(Some(ConnectionState::Running), false, Some(&on), None),
+            ProxyAction::Nothing
+        );
+        assert_eq!(proxy_action(None, true, None, None), ProxyAction::Nothing);
+    }
+
+    #[test]
+    fn a_disabled_inbound_is_never_enabled_and_is_reported() {
+        let off = inbound(false, "127.0.0.1", 2080);
+        let running = Some(ConnectionState::Running);
+        assert_eq!(
+            proxy_action(running, true, Some(&off), None),
+            ProxyAction::Nothing
+        );
+        assert!(inbound_blocked(running, true, Some(&off)));
+        assert!(!inbound_blocked(running, false, Some(&off)));
+        assert!(!inbound_blocked(
+            Some(ConnectionState::Idle),
+            true,
+            Some(&off)
+        ));
+        // Already applied and now the inbound is off: the proxy must not point at it.
+        assert_eq!(
+            proxy_action(running, true, Some(&off), Some(("127.0.0.1", 2080))),
+            ProxyAction::Disable
+        );
+    }
+
     #[test]
     fn import_summary_counts_failures() {
         let mut response = ImportResponse {
@@ -748,7 +1017,18 @@ mod tests {
         state.wait_for(is_ready).await.expect("state channel open");
         println!("engine Ready");
 
-        let engine = Engine::new(handle.client(), port, Box::new(|_| {}));
+        // A fake runner: the real desktop proxy must not change during this test.
+        let sysproxy = SystemProxy::with_runner(
+            dir.path(),
+            Arc::new(crate::sysproxy::runner::FakeRunner::new()),
+        );
+        let engine = Engine::new(
+            handle.client(),
+            port,
+            Box::new(|_| {}),
+            Arc::new(sysproxy),
+            dir.path().join("prefs.json"),
+        );
 
         engine.fix_ports().await.expect("port check");
         let settings: GetSettingsResponse<SettingsMap> = engine

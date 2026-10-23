@@ -9,5 +9,5 @@ mod config;
 mod policy;
 mod supervisor;
 
-pub use config::SidecarConfig;
+pub use config::{default_data_root, SidecarConfig};
 pub use supervisor::{Sidecar, SidecarHandle, SidecarState};

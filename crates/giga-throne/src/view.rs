@@ -60,6 +60,8 @@ pub struct Frame {
     pub error: String,
     /// Clear the import box (the last import succeeded).
     pub clear_import: bool,
+    /// The "Системный прокси" preference, for its switch.
+    pub system_proxy: bool,
 }
 
 /// Formats a transfer rate in bytes per second, 1024-based: "512 Б/с", "12.3 КБ/с".
@@ -247,6 +249,7 @@ fn apply(window: &AppWindow, frame: Frame) {
     window.set_inbound_text(home.inbound_text.into());
     window.set_error_text(frame.error.into());
     window.set_import_result(frame.import_result.into());
+    window.set_sysproxy_on(frame.system_proxy);
     if frame.clear_import {
         window.set_import_text("".into());
     }

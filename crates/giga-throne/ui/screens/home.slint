@@ -17,8 +17,10 @@ export component HomeScreen inherits Rectangle {
     in-out property <string> inbound-text: "—";
     in-out property <string> error-text;
     in property <string> engine-status;
+    in-out property <bool> sysproxy-on: true;
 
     callback toggle();
+    callback toggle-sysproxy();
 
     VerticalLayout {
         // Main column: centered content, takes the free height.
@@ -204,6 +206,83 @@ export component HomeScreen inherits Rectangle {
                             stroke: Theme.muted;
                             stroke-width: 2px;
                             fill: transparent;
+                        }
+                    }
+                }
+            }
+
+            // "Системный прокси" switch: all apps' traffic through the VPN.
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 320px;
+                    height: 52px;
+                    border-radius: 16px;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.raised;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 12px;
+                        alignment: space-between;
+                        spacing: 12px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+
+                            Text {
+                                text: "Системный прокси";
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 14px;
+                                font-weight: 600;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: "весь трафик приложений через VPN";
+                                color: Theme.muted;
+                                font-family: Theme.font-body;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 44px;
+                            height: 26px;
+                            border-radius: 13px;
+                            background: root.sysproxy-on ? Theme.accent : Theme.raised;
+
+                            animate background {
+                                duration: Theme.anim;
+                                easing: ease-out;
+                            }
+
+                            knob := Rectangle {
+                                x: root.sysproxy-on ? 21px : 3px;
+                                y: 3px;
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 10px;
+                                background: root.sysproxy-on ? Theme.on-accent : Theme.muted;
+
+                                animate x, background {
+                                    duration: Theme.anim;
+                                    easing: ease-out;
+                                }
+                            }
+
+                            TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                clicked => {
+                                    root.toggle-sysproxy();
+                                }
+                            }
                         }
                     }
                 }

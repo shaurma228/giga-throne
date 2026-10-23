@@ -27,8 +27,6 @@ impl SidecarConfig {
     ///
     /// Honours `GIGA_THRONE_SIDECAR` (path to Throne) and `GIGA_THRONE_PORT`.
     pub fn from_env() -> Result<Self> {
-        let dirs = directories::ProjectDirs::from("", "", "giga-throne")
-            .context("cannot find the user's data directory")?;
         let binary = resolve_binary(
             std::env::var_os("GIGA_THRONE_SIDECAR"),
             current_exe_dir().as_deref(),
@@ -37,7 +35,7 @@ impl SidecarConfig {
         let port = parse_port(std::env::var("GIGA_THRONE_PORT").ok().as_deref())?;
         Ok(Self {
             binary,
-            data_root: dirs.data_dir().to_path_buf(),
+            data_root: default_data_root()?,
             port,
         })
     }
@@ -56,6 +54,13 @@ impl SidecarConfig {
     pub fn listen_addr(&self) -> String {
         format!("127.0.0.1:{}", self.port)
     }
+}
+
+/// Our data root: the platform's data directory for giga-throne.
+pub fn default_data_root() -> Result<PathBuf> {
+    let dirs = directories::ProjectDirs::from("", "", "giga-throne")
+        .context("cannot find the user's data directory")?;
+    Ok(dirs.data_dir().to_path_buf())
 }
 
 /// Directory of our executable, if it is known.

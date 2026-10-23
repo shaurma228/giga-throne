@@ -35,9 +35,13 @@ export component AppWindow inherits Window {
     in-out property <string> import-text;
     in-out property <string> import-result;
 
+    // "Системный прокси" switch, set from Rust (src/view.rs).
+    in-out property <bool> sysproxy-on: true;
+
     callback toggle();
     callback pick(int);
     callback import-link(string);
+    callback toggle-sysproxy();
 
     HorizontalLayout {
         NavRail {
@@ -58,8 +62,12 @@ export component AppWindow inherits Window {
             up-rate <=> root.up-rate;
             inbound-text <=> root.inbound-text;
             error-text <=> root.error-text;
+            sysproxy-on <=> root.sysproxy-on;
             toggle => {
                 root.toggle();
+            }
+            toggle-sysproxy => {
+                root.toggle-sysproxy();
             }
         }
 
