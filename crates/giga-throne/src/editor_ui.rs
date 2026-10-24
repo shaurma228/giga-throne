@@ -607,7 +607,7 @@ impl EditorUi {
                 state.set_route_name(name.as_str().into());
                 state.set_is_new(id.is_none());
                 state.set_remote(is_remote);
-                state.set_advanced(false);
+                state.set_advanced(crate::dev_aid::take_start_advanced());
                 state.set_leave_pending(-1);
                 window.set_page(2);
                 self.refresh(true);

@@ -1,6 +1,7 @@
 //! giga-throne: desktop UI for the Throne engine.
 
 mod app;
+mod dev_aid;
 mod editor_ui;
 mod engine;
 mod prefs;
@@ -39,6 +40,7 @@ fn main() -> anyhow::Result<()> {
 
     let window = AppWindow::new()?;
     let commands = engine::bind_callbacks(&window);
+    dev_aid::apply_startup(&window);
     let engine = app::start_engine(
         &runtime,
         &window,

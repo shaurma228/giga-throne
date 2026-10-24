@@ -129,6 +129,8 @@ cargo run -p giga-throne          # запуск
 cargo test --workspace            # тесты (включая тест-векторы протокола)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
+GIGA_THRONE_PAGE=2 cargo run -p giga-throne        # только debug: старт на странице 0 Главная, 1 Маршруты, 2 новый маршрут, 2:<id> маршрут <id>
+GIGA_THRONE_EDITOR_MODE=advanced cargo run -p giga-throne  # только debug: редактор стартует в «Продвинуто»
 ```
 
 Тулчейн задан в `rust-toolchain.toml` (stable). Версии зависимостей добавлять через `cargo add`, не вписывать руками.
