@@ -3,6 +3,7 @@
 //!
 //! Everything here is pure. The engine runs the plan against the API.
 
+use throne_api::routes::encode_remote_route_link;
 use throne_api::types::{AddRouteResponse, Route};
 
 /// Throne's built-in routing profile, the "Всё через VPN" mode.
@@ -155,6 +156,16 @@ pub fn region_or_default(region: &str) -> &str {
 /// The list URL of a preset, or `None` for the built-in "Default" profile.
 pub fn preset_url(preset: &Preset) -> Option<String> {
     preset.file.map(|file| format!("{LIST_URL_PREFIX}{file}"))
+}
+
+/// The `throne://remoteroute/` link that adds the preset's list under its name,
+/// or `None` for the built-in "Default" profile. The name is the list's file
+/// name with spaces for underscores, so Throne shows "Proxy Russia Blocked"
+/// instead of the host.
+pub fn preset_link(preset: &Preset) -> Option<String> {
+    let url = preset_url(preset)?;
+    let name = preset.file?.replace('_', " ");
+    Some(encode_remote_route_link(&[(url, name)]))
 }
 
 /// Canonical form of a URL for comparing: surrounding and trailing slashes
@@ -334,6 +345,21 @@ mod tests {
         );
         assert_eq!(preset_url(find("ru-all").expect("preset")), None);
         assert!(find("nope").is_none());
+    }
+
+    #[test]
+    fn preset_link_names_the_route_after_the_file() {
+        let blocked = find("ru-blocked").expect("preset exists");
+        let link = preset_link(blocked).expect("remote preset has a link");
+        let entries = throne_api::routes::decode_remote_route_link(&link).expect("decodes");
+        assert_eq!(
+            entries,
+            [(
+                url_of("Proxy_Russia_Blocked"),
+                "Proxy Russia Blocked".to_owned()
+            )]
+        );
+        assert_eq!(preset_link(find("ru-all").expect("preset")), None);
     }
 
     #[test]
@@ -956,6 +982,8 @@ mod e2e {
                 "the preset's route is not active: {status:?}"
             );
             assert!(added.remote && added.rule_count > 0, "{added:?}");
+            assert_eq!(added.name, "Proxy Russia Blocked");
+
         })
         .await;
     }

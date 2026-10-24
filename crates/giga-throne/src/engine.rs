@@ -381,9 +381,11 @@ impl Engine {
         match presets::plan_preset(&routes, preset) {
             PresetPlan::Activate(route_id) => self.activate_route(route_id).await,
             PresetPlan::AddThenActivate(url) => {
+                let link =
+                    presets::preset_link(preset).ok_or_else(|| NO_DEFAULT_ROUTE_TEXT.to_owned())?;
                 let added = self
                     .client
-                    .add_remote_routes(&url, true)
+                    .add_remote_routes(&link, true)
                     .await
                     .map_err(|err| route_error_text(&err, true))?;
                 let route_id = presets::pick_added_route(&added, &url)?;
