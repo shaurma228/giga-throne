@@ -17,3 +17,5 @@ cargo run -p giga-throne
 ## Лицензия
 
 GPL-3.0-or-later, как и Throne. Спецификация протокола в `docs/throne-api/` — MIT, © The Throne Authors.
+
+Шрифты (SIL OPEN FONT LICENSE 1.1, тексты в `crates/giga-throne/ui/fonts/*-OFL.txt`): Unbounded, Manrope, JetBrains Mono.

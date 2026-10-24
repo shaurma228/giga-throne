@@ -1,4 +1,9 @@
 import { Theme } from "theme.slint";
+// Fonts are embedded at build time; family names come from the files' name tables (see Theme.font-*).
+// Variable TTFs: Slint applies the requested weight through the wght axis. OFL texts: fonts/*-OFL.txt.
+import "fonts/Unbounded-Variable.ttf";
+import "fonts/Manrope-Variable.ttf";
+import "fonts/JetBrainsMono-Variable.ttf";
 import { NavRail } from "components/nav-rail.slint";
 import { ServerList, ServerItem } from "components/server-list.slint";
 import { HomeScreen } from "screens/home.slint";
@@ -20,6 +25,7 @@ export component AppWindow inherits Window {
     min-width: 1040px;
     min-height: 680px;
     background: Theme.bg;
+    default-font-family: Theme.font-body;
     no-frame: false;
 
     in property <string> engine-status: "Движок запускается…";
