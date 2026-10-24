@@ -409,6 +409,10 @@ component BucketCard inherits Rectangle {
     in property <BucketItem> item;
     in property <color> tone-color;
 
+    // Columns share the row by stretch alone: no content-based width may take a bigger share.
+    min-width: 0px;
+    preferred-width: 0px;
+
     callback add(string) -> bool;
     callback remove-chip(int);
 
@@ -480,6 +484,8 @@ component BucketCard inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 IconButton {
+                    width: 36px;
+                    height: 36px;
                     icon: "M 12 5 L 12 19 M 5 12 L 19 12";
                     clicked => {
                         root.submit();
@@ -496,21 +502,28 @@ component BucketCard inherits Rectangle {
             wrap: word-wrap;
         }
 
-        Flickable {
+        // A Flickable takes its width limits from its layout child, and the chips' limit is
+        // bounded, which would cap the whole row. The plain Rectangle keeps the limit out.
+        Rectangle {
             vertical-stretch: 1;
-            interactive: true;
-            content-height: chips.preferred-height;
 
-            chips := FlexboxLayout {
+            Flickable {
                 width: parent.width;
-                spacing: 6px;
+                height: parent.height;
+                interactive: true;
+                content-height: chips.preferred-height;
 
-                for chip in root.item.items : Chip {
-                    kind: chip.kind;
-                    tone: chip.tone;
-                    value: chip.value;
-                    remove => {
-                        root.remove-chip(chip.index);
+                chips := FlexboxLayout {
+                    width: parent.width;
+                    spacing: 6px;
+
+                    for chip in root.item.items : Chip {
+                        kind: chip.kind;
+                        tone: chip.tone;
+                        value: chip.value;
+                        remove => {
+                            root.remove-chip(chip.index);
+                        }
                     }
                 }
             }
@@ -1018,6 +1031,7 @@ component SimpleView inherits VerticalLayout {
 
         for bucket in EditorState.buckets : BucketCard {
             horizontal-stretch: 1;
+            vertical-stretch: 1;
             item: bucket;
             tone-color: bucket.index == 0 ? Theme.accent : bucket.index == 1 ? Theme.proto-vless : Theme.ping-bad;
             add(text) => {
@@ -1087,6 +1101,7 @@ component AdvancedView inherits HorizontalLayout {
 
     VerticalLayout {
         horizontal-stretch: 1;
+        vertical-stretch: 1;
         spacing: 6px;
 
         Text {
@@ -1096,6 +1111,8 @@ component AdvancedView inherits HorizontalLayout {
             font-size: 12px;
         }
 
+        // The rules, the default row and the add button scroll together; the space left
+        // over stays below the add button, as in the design.
         Flickable {
             vertical-stretch: 1;
             interactive: true;
@@ -1104,6 +1121,7 @@ component AdvancedView inherits HorizontalLayout {
             rules-col := VerticalLayout {
                 width: parent.width;
                 spacing: 6px;
+                alignment: start;
 
                 for rule in EditorState.rules : RuleRow {
                     item: rule;
@@ -1115,64 +1133,64 @@ component AdvancedView inherits HorizontalLayout {
                         EditorState.toggle-rule(rule.index);
                     }
                 }
-            }
-        }
 
-        Rectangle {
-            height: 48px;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: Theme.line;
+                Rectangle {
+                    height: 48px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: Theme.line;
 
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 10px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
 
-                Text {
-                    horizontal-stretch: 1;
-                    text: "Всё остальное";
-                    color: Theme.text-2;
-                    font-family: Theme.font-body;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: "Всё остальное";
+                            color: Theme.text-2;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
 
-                VerticalLayout {
-                    alignment: center;
-                    Pill {
-                        kind: EditorState.default-proxy ? "vpn" : EditorState.default-other != "" ? "other" : "direct";
-                        label: EditorState.default-proxy ? "VPN" : EditorState.default-other != "" ? EditorState.default-other : "Напрямую";
+                        VerticalLayout {
+                            alignment: center;
+                            Pill {
+                                kind: EditorState.default-proxy ? "vpn" : EditorState.default-other != "" ? "other" : "direct";
+                                label: EditorState.default-proxy ? "VPN" : EditorState.default-other != "" ? EditorState.default-other : "Напрямую";
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        Rectangle {
-            height: 40px;
-            border-radius: 12px;
-            border-width: 1.5px;
-            border-color: Theme.line;
-            accessible-role: button;
-            accessible-label: "Добавить правило";
+                Rectangle {
+                    height: 40px;
+                    border-radius: 12px;
+                    border-width: 1.5px;
+                    border-color: Theme.line;
+                    accessible-role: button;
+                    accessible-label: "Добавить правило";
 
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: "+ Правило";
-                color: Theme.text;
-                font-family: Theme.font-body;
-                font-size: 13px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "+ Правило";
+                        color: Theme.text;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
 
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    EditorState.flush();
-                    EditorState.add-rule();
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            EditorState.flush();
+                            EditorState.add-rule();
+                        }
+                    }
                 }
             }
         }
@@ -1184,6 +1202,7 @@ component AdvancedView inherits HorizontalLayout {
 
     if EditorState.selected < 0 : Rectangle {
         width: 330px;
+        vertical-stretch: 1;
         border-radius: 16px;
         border-width: 1px;
         border-color: Theme.raised;
@@ -1474,10 +1493,12 @@ export component RouteEditorScreen inherits Rectangle {
         }
 
         if !EditorState.advanced : SimpleView {
+            horizontal-stretch: 1;
             vertical-stretch: 1;
         }
 
         if EditorState.advanced : AdvancedView {
+            horizontal-stretch: 1;
             vertical-stretch: 1;
         }
 
