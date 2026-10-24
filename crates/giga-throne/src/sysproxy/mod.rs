@@ -468,10 +468,20 @@ mod tests {
     }
 
     /// Changes the real KDE and GNOME proxy settings, so it is ignored by default.
-    /// Run with `cargo test -p giga-throne real_kde_roundtrip -- --ignored --nocapture`.
+    /// It also returns early unless the env var `GIGA_THRONE_TEST_DESKTOP=1` is set:
+    /// the other real-Throne tests run in parallel with `-- --ignored` and would
+    /// fetch through the bogus proxy while this one is enabled.
+    /// Run with `GIGA_THRONE_TEST_DESKTOP=1 cargo test -p giga-throne real_kde_roundtrip -- --ignored --nocapture`.
     #[test]
     #[ignore = "changes the real desktop proxy settings"]
     fn real_kde_roundtrip() {
+        if std::env::var("GIGA_THRONE_TEST_DESKTOP").as_deref() != Ok("1") {
+            eprintln!(
+                "skipped: real_kde_roundtrip changes the desktop proxy; \
+                 run it with GIGA_THRONE_TEST_DESKTOP=1 cargo test -p giga-throne real_kde_roundtrip -- --ignored --nocapture"
+            );
+            return;
+        }
         let runner = ProcessRunner;
         let dir = tempfile::tempdir().expect("temp dir");
         let proxy = SystemProxy::new(dir.path());
