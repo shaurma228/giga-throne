@@ -139,12 +139,13 @@ export component HomeScreen inherits Rectangle {
                 }
             }
 
-            // Current server pill.
+            // Current server pill: badge, name and ping stacked on the left, chevron on the far right.
             HorizontalLayout {
                 alignment: center;
 
                 Rectangle {
-                    width: 320px;
+                    min-width: 300px;
+                    preferred-width: 320px;
                     height: 52px;
                     border-radius: 16px;
                     background: Theme.surface;
@@ -155,24 +156,27 @@ export component HomeScreen inherits Rectangle {
                         padding-left: 8px;
                         padding-right: 16px;
                         spacing: 12px;
-                        alignment: center;
 
-                        Rectangle {
-                            width: 36px;
-                            height: 36px;
-                            border-radius: Theme.radius-s;
-                            background: Theme.raised;
+                        VerticalLayout {
+                            alignment: center;
 
-                            Text {
-                                width: parent.width;
-                                height: parent.height;
-                                text: root.server-code;
-                                color: Theme.text;
-                                font-family: Theme.font-display;
-                                font-size: 12px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            Rectangle {
+                                width: 36px;
+                                height: 36px;
+                                border-radius: Theme.radius-s;
+                                background: Theme.raised;
+
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.server-code;
+                                    color: Theme.text;
+                                    font-family: Theme.font-display;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
 
@@ -187,6 +191,7 @@ export component HomeScreen inherits Rectangle {
                                 font-family: Theme.font-body;
                                 font-size: 15px;
                                 font-weight: 700;
+                                horizontal-alignment: left;
                                 overflow: elide;
                             }
 
@@ -195,17 +200,22 @@ export component HomeScreen inherits Rectangle {
                                 color: Theme.muted;
                                 font-family: Theme.font-body;
                                 font-size: 12px;
+                                horizontal-alignment: left;
                                 overflow: elide;
                             }
                         }
 
-                        Path {
-                            width: 18px;
-                            height: 18px;
-                            commands: "M 7 4 L 13 9 L 7 14";
-                            stroke: Theme.muted;
-                            stroke-width: 2px;
-                            fill: transparent;
+                        VerticalLayout {
+                            alignment: center;
+
+                            Path {
+                                width: 18px;
+                                height: 18px;
+                                commands: "M 7 4 L 13 9 L 7 14";
+                                stroke: Theme.muted;
+                                stroke-width: 2px;
+                                fill: transparent;
+                            }
                         }
                     }
                 }
@@ -217,20 +227,18 @@ export component HomeScreen inherits Rectangle {
 
                 Rectangle {
                     width: 320px;
-                    height: 52px;
                     border-radius: 16px;
                     background: Theme.surface;
                     border-width: 1px;
                     border-color: Theme.raised;
 
                     HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 12px;
-                        alignment: space-between;
+                        padding: 14px;
                         spacing: 12px;
 
                         VerticalLayout {
                             alignment: center;
+                            horizontal-stretch: 1;
                             spacing: 2px;
 
                             Text {
@@ -239,6 +247,7 @@ export component HomeScreen inherits Rectangle {
                                 font-family: Theme.font-body;
                                 font-size: 14px;
                                 font-weight: 600;
+                                horizontal-alignment: left;
                                 overflow: elide;
                             }
 
@@ -247,40 +256,45 @@ export component HomeScreen inherits Rectangle {
                                 color: Theme.muted;
                                 font-family: Theme.font-body;
                                 font-size: 12px;
+                                horizontal-alignment: left;
                                 overflow: elide;
                             }
                         }
 
-                        Rectangle {
-                            width: 44px;
-                            height: 26px;
-                            border-radius: 13px;
-                            background: root.sysproxy-on ? Theme.accent : Theme.raised;
+                        VerticalLayout {
+                            alignment: center;
 
-                            animate background {
-                                duration: Theme.anim;
-                                easing: ease-out;
-                            }
+                            Rectangle {
+                                width: 44px;
+                                height: 26px;
+                                border-radius: 13px;
+                                background: root.sysproxy-on ? Theme.accent : Theme.raised;
 
-                            knob := Rectangle {
-                                x: root.sysproxy-on ? 21px : 3px;
-                                y: 3px;
-                                width: 20px;
-                                height: 20px;
-                                border-radius: 10px;
-                                background: root.sysproxy-on ? Theme.on-accent : Theme.muted;
-
-                                animate x, background {
+                                animate background {
                                     duration: Theme.anim;
                                     easing: ease-out;
                                 }
-                            }
 
-                            TouchArea {
-                                width: parent.width;
-                                height: parent.height;
-                                clicked => {
-                                    root.toggle-sysproxy();
+                                knob := Rectangle {
+                                    x: root.sysproxy-on ? 21px : 3px;
+                                    y: 3px;
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: 10px;
+                                    background: root.sysproxy-on ? Theme.on-accent : Theme.muted;
+
+                                    animate x, background {
+                                        duration: Theme.anim;
+                                        easing: ease-out;
+                                    }
+                                }
+
+                                TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    clicked => {
+                                        root.toggle-sysproxy();
+                                    }
                                 }
                             }
                         }

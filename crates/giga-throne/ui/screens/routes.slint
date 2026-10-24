@@ -436,13 +436,16 @@ export component RoutesScreen inherits Rectangle {
                         padding-right: 12px;
                         spacing: 12px;
 
-                        Rectangle {
-                            width: 18px;
-                            height: 18px;
-                            border-radius: 9px;
-                            border-width: m.active ? 5px : 2px;
-                            border-color: m.active ? Theme.accent : Theme.muted;
-                            background: transparent;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 18px;
+                                height: 18px;
+                                border-radius: 9px;
+                                border-width: m.active ? 5px : 2px;
+                                border-color: m.active ? Theme.accent : Theme.muted;
+                                background: transparent;
+                            }
                         }
 
                         VerticalLayout {
@@ -468,84 +471,93 @@ export component RoutesScreen inherits Rectangle {
                             }
                         }
 
-                        Rectangle {
-                            width: 92px;
-                            height: 32px;
-                            border-radius: 10px;
-                            background: Theme.raised;
-                            accessible-role: button;
-                            accessible-label: "Изменить";
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 92px;
+                                height: 32px;
+                                border-radius: 10px;
+                                background: Theme.raised;
+                                accessible-role: button;
+                                accessible-label: "Изменить";
 
-                            Text {
-                                width: parent.width;
-                                height: parent.height;
-                                text: "Изменить";
-                                color: Theme.text;
-                                font-family: Theme.font-body;
-                                font-size: 13px;
-                                font-weight: 600;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: "Изменить";
+                                    color: Theme.text;
+                                    font-family: Theme.font-body;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
 
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.edit-route(m.id);
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.edit-route(m.id);
+                                    }
                                 }
                             }
                         }
 
                         // Delete with a confirmation: the first press shows "Точно?" for 3 s.
-                        Rectangle {
-                            width: root.confirm-id == m.id ? 84px : 36px;
-                            height: 36px;
-                            border-radius: 10px;
-                            background: root.confirm-id == m.id ? Theme.ping-bad.with-alpha(0.14) : transparent;
-                            accessible-role: button;
-                            accessible-label: root.confirm-id == m.id ? "Точно удалить маршрут" : "Удалить маршрут";
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: root.confirm-id == m.id ? 84px : 36px;
+                                height: 36px;
+                                border-radius: 10px;
+                                background: root.confirm-id == m.id ? Theme.ping-bad.with-alpha(0.14) : transparent;
+                                accessible-role: button;
+                                accessible-label: root.confirm-id == m.id ? "Точно удалить маршрут" : "Удалить маршрут";
 
-                            animate width {
-                                duration: Theme.anim-fast;
-                            }
-
-                            if root.confirm-id != m.id : HorizontalLayout {
-                                alignment: center;
-
-                                Path {
-                                    width: 22px;
-                                    height: 22px;
-                                    commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
-                                    stroke: Theme.muted;
-                                    stroke-width: 2px;
-                                    stroke-line-cap: round;
-                                    stroke-line-join: round;
-                                    fill: transparent;
+                                animate width {
+                                    duration: Theme.anim-fast;
                                 }
-                            }
 
-                            if root.confirm-id == m.id : Text {
-                                width: parent.width;
-                                height: parent.height;
-                                text: "Точно?";
-                                color: Theme.ping-bad;
-                                font-family: Theme.font-body;
-                                font-size: 13px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
+                                VerticalLayout {
+                                    alignment: center;
+                                    if root.confirm-id != m.id : HorizontalLayout {
+                                        alignment: center;
 
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    if root.confirm-id == m.id {
-                                        root.confirm-id = -1;
-                                        confirm.stop();
-                                        root.delete-route(m.id);
-                                    } else {
-                                        root.confirm-id = m.id;
-                                        confirm.restart();
+                                        Path {
+                                            width: 22px;
+                                            height: 22px;
+                                            commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
+                                            stroke: Theme.muted;
+                                            stroke-width: 2px;
+                                            stroke-line-cap: round;
+                                            stroke-line-join: round;
+                                            fill: transparent;
+                                        }
+                                    }
+                                }
+
+                                if root.confirm-id == m.id : Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: "Точно?";
+                                    color: Theme.ping-bad;
+                                    font-family: Theme.font-body;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        if root.confirm-id == m.id {
+                                            root.confirm-id = -1;
+                                            confirm.stop();
+                                            root.delete-route(m.id);
+                                        } else {
+                                            root.confirm-id = m.id;
+                                            confirm.restart();
+                                        }
                                     }
                                 }
                             }

@@ -312,31 +312,34 @@ component Chip inherits Rectangle {
             vertical-alignment: center;
         }
 
-        Rectangle {
-            width: 22px;
-            height: 22px;
-            border-radius: 6px;
-            accessible-role: button;
-            accessible-label: "Убрать " + root.value;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 6px;
+                accessible-role: button;
+                accessible-label: "Убрать " + root.value;
 
-            Path {
-                width: 12px;
-                height: 12px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 6 6 L 18 18 M 18 6 L 6 18";
-                stroke: Theme.muted;
-                stroke-width: 2.5px;
-                stroke-line-cap: round;
-                fill: transparent;
-            }
+                Path {
+                    width: 12px;
+                    height: 12px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 6 6 L 18 18 M 18 6 L 6 18";
+                    stroke: Theme.muted;
+                    stroke-width: 2.5px;
+                    stroke-line-cap: round;
+                    fill: transparent;
+                }
 
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    root.remove();
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.remove();
+                    }
                 }
             }
         }
@@ -368,29 +371,32 @@ component ValueChip inherits Rectangle {
             vertical-alignment: center;
         }
 
-        if root.usable : Rectangle {
-            width: 18px;
-            height: 18px;
-            border-radius: 5px;
+        VerticalLayout {
+            alignment: center;
+            if root.usable : Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
 
-            Path {
-                width: 9px;
-                height: 9px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 6 6 L 18 18 M 18 6 L 6 18";
-                stroke: Theme.muted;
-                stroke-width: 3px;
-                stroke-line-cap: round;
-                fill: transparent;
-            }
+                Path {
+                    width: 9px;
+                    height: 9px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 6 6 L 18 18 M 18 6 L 6 18";
+                    stroke: Theme.muted;
+                    stroke-width: 3px;
+                    stroke-line-cap: round;
+                    fill: transparent;
+                }
 
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    root.removed();
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.removed();
+                    }
                 }
             }
         }
@@ -471,10 +477,13 @@ component BucketCard inherits Rectangle {
                 }
             }
 
-            IconButton {
-                icon: "M 12 5 L 12 19 M 5 12 L 19 12";
-                clicked => {
-                    root.submit();
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: "M 12 5 L 12 19 M 5 12 L 19 12";
+                    clicked => {
+                        root.submit();
+                    }
                 }
             }
         }
@@ -571,27 +580,36 @@ component RuleRow inherits Rectangle {
             }
         }
 
-        if !root.item.editable : Path {
-            width: 14px;
-            height: 14px;
-            viewbox-width: 24;
-            viewbox-height: 24;
-            commands: "M 6 11 L 18 11 L 18 20 L 6 20 Z M 8 11 L 8 7 L 16 7 L 16 11";
-            stroke: Theme.muted;
-            stroke-width: 2px;
-            stroke-line-join: round;
-            fill: transparent;
+        VerticalLayout {
+            alignment: center;
+            if !root.item.editable : Path {
+                width: 14px;
+                height: 14px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 6 11 L 18 11 L 18 20 L 6 20 Z M 8 11 L 8 7 L 16 7 L 16 11";
+                stroke: Theme.muted;
+                stroke-width: 2px;
+                stroke-line-join: round;
+                fill: transparent;
+            }
         }
 
-        Pill {
-            kind: root.item.action-kind;
-            label: root.item.action;
+        VerticalLayout {
+            alignment: center;
+            Pill {
+                kind: root.item.action-kind;
+                label: root.item.action;
+            }
         }
 
-        Toggle {
-            on: root.item.enabled;
-            picked => {
-                root.toggle();
+        VerticalLayout {
+            alignment: center;
+            Toggle {
+                on: root.item.enabled;
+                picked => {
+                    root.toggle();
+                }
             }
         }
     }
@@ -767,70 +785,79 @@ component Details inherits Rectangle {
                 }
             }
 
-            IconButton {
-                icon: "M 6 15 L 12 9 L 18 15";
-                clicked => {
-                    EditorState.flush();
-                    EditorState.move-rule(true);
-                }
-            }
-
-            IconButton {
-                icon: "M 6 9 L 12 15 L 18 9";
-                clicked => {
-                    EditorState.flush();
-                    EditorState.move-rule(false);
-                }
-            }
-
-            Rectangle {
-                height: 32px;
-                width: root.armed ? 84px : 32px;
-                border-radius: 8px;
-                background: root.armed ? Theme.ping-bad.with-alpha(0.14) : Theme.raised;
-                accessible-role: button;
-                accessible-label: root.armed ? "Точно удалить правило" : "Удалить правило";
-
-                animate width {
-                    duration: Theme.anim-fast;
-                }
-
-                if !root.armed : Path {
-                    width: 16px;
-                    height: 16px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
-                    stroke: Theme.muted;
-                    stroke-width: 2px;
-                    stroke-line-cap: round;
-                    stroke-line-join: round;
-                    fill: transparent;
-                }
-
-                if root.armed : Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "Точно?";
-                    color: Theme.ping-bad;
-                    font-family: Theme.font-body;
-                    font-size: 13px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                TouchArea {
-                    mouse-cursor: pointer;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: "M 6 15 L 12 9 L 18 15";
                     clicked => {
-                        if root.armed {
-                            root.armed = false;
-                            EditorState.flush();
-                            EditorState.delete-rule();
-                        } else {
-                            root.armed = true;
+                        EditorState.flush();
+                        EditorState.move-rule(true);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: "M 6 9 L 12 15 L 18 9";
+                    clicked => {
+                        EditorState.flush();
+                        EditorState.move-rule(false);
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 32px;
+                    width: root.armed ? 84px : 32px;
+                    border-radius: 8px;
+                    background: root.armed ? Theme.ping-bad.with-alpha(0.14) : Theme.raised;
+                    accessible-role: button;
+                    accessible-label: root.armed ? "Точно удалить правило" : "Удалить правило";
+
+                    animate width {
+                        duration: Theme.anim-fast;
+                    }
+
+                    if !root.armed : Path {
+                        width: 16px;
+                        height: 16px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
+                        stroke: Theme.muted;
+                        stroke-width: 2px;
+                        stroke-line-cap: round;
+                        stroke-line-join: round;
+                        fill: transparent;
+                    }
+
+                    if root.armed : Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "Точно?";
+                        color: Theme.ping-bad;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if root.armed {
+                                root.armed = false;
+                                EditorState.flush();
+                                EditorState.delete-rule();
+                            } else {
+                                root.armed = true;
+                            }
                         }
                     }
                 }
@@ -1111,9 +1138,12 @@ component AdvancedView inherits HorizontalLayout {
                     vertical-alignment: center;
                 }
 
-                Pill {
-                    kind: EditorState.default-proxy ? "vpn" : EditorState.default-other != "" ? "other" : "direct";
-                    label: EditorState.default-proxy ? "VPN" : EditorState.default-other != "" ? EditorState.default-other : "Напрямую";
+                VerticalLayout {
+                    alignment: center;
+                    Pill {
+                        kind: EditorState.default-proxy ? "vpn" : EditorState.default-other != "" ? "other" : "direct";
+                        label: EditorState.default-proxy ? "VPN" : EditorState.default-other != "" ? EditorState.default-other : "Напрямую";
+                    }
                 }
             }
         }
@@ -1188,34 +1218,37 @@ export component RouteEditorScreen inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
 
-            Rectangle {
-                width: 36px;
-                height: 36px;
-                border-radius: 10px;
-                background: Theme.raised;
-                accessible-role: button;
-                accessible-label: "Назад к маршрутам";
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 10px;
+                    background: Theme.raised;
+                    accessible-role: button;
+                    accessible-label: "Назад к маршрутам";
 
-                Path {
-                    width: 18px;
-                    height: 18px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M 15 6 L 9 12 L 15 18";
-                    stroke: Theme.text;
-                    stroke-width: 2.5px;
-                    stroke-line-cap: round;
-                    stroke-line-join: round;
-                    fill: transparent;
-                }
+                    Path {
+                        width: 18px;
+                        height: 18px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: "M 15 6 L 9 12 L 15 18";
+                        stroke: Theme.text;
+                        stroke-width: 2.5px;
+                        stroke-line-cap: round;
+                        stroke-line-join: round;
+                        fill: transparent;
+                    }
 
-                TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        EditorState.flush();
-                        root.navigate(1);
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            EditorState.flush();
+                            root.navigate(1);
+                        }
                     }
                 }
             }
@@ -1319,18 +1352,24 @@ export component RouteEditorScreen inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                Btn {
-                    label: "Да";
-                    primary: true;
-                    clicked => {
-                        root.leave-confirmed(EditorState.leave-pending);
+                VerticalLayout {
+                    alignment: center;
+                    Btn {
+                        label: "Да";
+                        primary: true;
+                        clicked => {
+                            root.leave-confirmed(EditorState.leave-pending);
+                        }
                     }
                 }
 
-                Btn {
-                    label: "Остаться";
-                    clicked => {
-                        EditorState.leave-pending = -1;
+                VerticalLayout {
+                    alignment: center;
+                    Btn {
+                        label: "Остаться";
+                        clicked => {
+                            EditorState.leave-pending = -1;
+                        }
                     }
                 }
             }
@@ -1389,38 +1428,44 @@ export component RouteEditorScreen inherits Rectangle {
                     horizontal-stretch: 1;
                 }
 
-                if EditorState.default-other != "" : Pill {
-                    kind: "other";
-                    label: EditorState.default-other;
+                VerticalLayout {
+                    alignment: center;
+                    if EditorState.default-other != "" : Pill {
+                        kind: "other";
+                        label: EditorState.default-other;
+                    }
                 }
 
-                Rectangle {
-                    width: 236px;
-                    height: 34px;
-                    border-radius: 10px;
-                    background: Theme.bg;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 236px;
+                        height: 34px;
+                        border-radius: 10px;
+                        background: Theme.bg;
 
-                    HorizontalLayout {
-                        padding: 3px;
-                        spacing: 3px;
+                        HorizontalLayout {
+                            padding: 3px;
+                            spacing: 3px;
 
-                        Seg {
-                            horizontal-stretch: 1;
-                            label: "Через VPN";
-                            chosen: EditorState.default-proxy;
-                            font-size: 12px;
-                            picked => {
-                                EditorState.set-default("proxy");
+                            Seg {
+                                horizontal-stretch: 1;
+                                label: "Через VPN";
+                                chosen: EditorState.default-proxy;
+                                font-size: 12px;
+                                picked => {
+                                    EditorState.set-default("proxy");
+                                }
                             }
-                        }
 
-                        Seg {
-                            horizontal-stretch: 1;
-                            label: "Напрямую";
-                            chosen: EditorState.default-direct;
-                            font-size: 12px;
-                            picked => {
-                                EditorState.set-default("direct");
+                            Seg {
+                                horizontal-stretch: 1;
+                                label: "Напрямую";
+                                chosen: EditorState.default-direct;
+                                font-size: 12px;
+                                picked => {
+                                    EditorState.set-default("direct");
+                                }
                             }
                         }
                     }
