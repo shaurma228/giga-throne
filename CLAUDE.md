@@ -77,12 +77,26 @@ sidecar/          бинарь Throne для разработки (в git не �
 иначе рядом с нашим исполняемым файлом. Порт по умолчанию 9096, чтобы не конфликтовать с обычным Throne на 9095.
 Коды выхода и watchdog описаны в `api.md` (раздел Headless Throne).
 Ещё передаём `--restart-mode exit`: перезапуск (код 75) делает наш супервизор. Нужен Throne **≥ 1.4.0**: в 1.3.x headless-режима нет.
-Для разработки в `sidecar/` лежит 1.4.0-beta.4 (версия в `sidecar/VERSION`). Проверить, что он жив: `sidecar/Throne/Throne --headless --health --data-dir <data>/throne`.
+Проверить, что он жив: `sidecar/Throne/Throne --headless --health --data-dir <data>/throne`.
+
+**Нужен Throne из нашего форка.** Стоковый Throne не умеет управлять маршрутами через API, поэтому эндпоинты
+`/v1/routes*` и `/v1/rule-sets` (спека: `docs/throne-api/routes-proposal.md`) живут в форке `~/git/Throne`, ветка
+`feat/route-api` (от тега 1.4.0-beta.4, PR в апстрим планируется). Собирается только Qt-часть, Go не нужен:
+```sh
+cd ~/git/Throne && mkdir -p build && curl -fLso build/srslist.h \
+  https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h
+cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo && ninja -C build Throne
+cp build/Throne ~/git/giga-throne/sidecar/Throne/Throne
+```
+`ThroneCore` в `sidecar/Throne/` — из релиза 1.4.0-beta.4 (совместим, пока форк на том же теге); стоковый бинарь лежит
+рядом как `Throne.release`. Что именно стоит — в `sidecar/VERSION`. Без форка приложение работает, но экран маршрутов
+покажет, что движку не хватает API. Тесты с настоящим движком: `cargo test -p giga-throne -- --ignored`.
 
 ## Дизайн
 
 Макеты — `docs/design/*.dc.html`, а также канвас https://claude.ai/artifact/3iHon3YRVvfWGXT93sxRBQ.
-Экраны: Главная (большая кнопка подключения), Серверы (группы, карточки), Импорт (ссылка/подписка/QR/файл), UI-кит.
+Экраны: Главная (большая кнопка подключения), Серверы (группы, карточки), Импорт (ссылка/подписка/QR/файл), Маршруты
+(пресеты по регионам + свои), Редактор маршрута (режимы «Просто» и «Продвинуто»), UI-кит.
 
 Токены (в коде живут в `ui/theme.slint`, хардкодить цвета в экранах нельзя):
 
