@@ -120,6 +120,12 @@ cp build/Throne ~/git/giga-throne/sidecar/Throne/Throne
 - Анимации короткие: 150–300 мс, `ease-out`. Ничего не крутится без причины.
 - UI-поток никогда не ждёт сеть: все запросы в tokio, результат в UI через `slint::invoke_from_event_loop` / `Weak::upgrade_in_event_loop`.
 - Текст ≥ 12 px, кликабельные цели ≥ 36–44 px, контраст текста ≥ 4.5:1.
+- Ловушки Slint 1.18: фиксированный по высоте ребёнок `HorizontalLayout` прижимается к верху строки — центрировать через
+  `VerticalLayout { alignment: center; … }`. `Flickable` без явной ширины передаёт родителям ограниченный `max-width`
+  своего содержимого и ужимает всю колонку — оборачивать в `Rectangle` и задавать `width/height: parent.*`.
+- Вёрстку проверять глазами, а не только компиляцией: `GIGA_THRONE_PAGE=… ./target/debug/giga-throne &`, через ~7 с
+  `spectacle -b -n -a -o <scratchpad>/shot.png` (только наше окно), затем `pkill -INT -f 'target/debug/giga-throne$'`
+  (штатный выход: снимает системный прокси и останавливает движок) и смотреть PNG. Субагентам давать этот цикл.
 
 ## Команды
 
