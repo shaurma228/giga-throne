@@ -3,6 +3,7 @@
 mod app;
 mod engine;
 mod prefs;
+mod presets;
 mod sidecar;
 mod sysproxy;
 mod view;

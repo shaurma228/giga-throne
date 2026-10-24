@@ -2,8 +2,9 @@ import { Theme } from "theme.slint";
 import { NavRail } from "components/nav-rail.slint";
 import { ServerList, ServerItem } from "components/server-list.slint";
 import { HomeScreen } from "screens/home.slint";
+import { RoutesScreen, PresetItem, RouteItem } from "screens/routes.slint";
 
-export { Theme, ServerItem }
+export { Theme, ServerItem, PresetItem, RouteItem }
 
 export component AppWindow inherits Window {
     title: "giga-throne";
@@ -15,6 +16,9 @@ export component AppWindow inherits Window {
     no-frame: false;
 
     in property <string> engine-status: "Движок запускается…";
+
+    // Page shown: 0 Home (with the server list), 1 Routes. Set by the nav rail.
+    in-out property <int> page: 0;
 
     // Home screen state, set from Rust (src/view.rs).
     in-out property <string> conn-state: "off";
@@ -38,16 +42,34 @@ export component AppWindow inherits Window {
     // "Системный прокси" switch, set from Rust (src/view.rs).
     in-out property <bool> sysproxy-on: true;
 
+    // Routes screen state, set from Rust (src/view.rs).
+    in-out property <string> route-region: "ru";
+    in-out property <[PresetItem]> route-presets;
+    in-out property <[RouteItem]> route-rows;
+    in-out property <string> busy-preset;
+    in-out property <int> busy-route: -1;
+    in-out property <bool> busy-import;
+    in-out property <string> route-note;
+    in-out property <bool> route-note-bad;
+
     callback toggle();
     callback pick(int);
     callback import-link(string);
     callback toggle-sysproxy();
+    callback select-preset(string);
+    callback activate-route(int);
+    callback import-route(string);
+    callback delete-route(int);
+    callback set-region(string);
+    callback create-route();
+    callback edit-route(int);
 
     HorizontalLayout {
         NavRail {
+            active <=> root.page;
         }
 
-        HomeScreen {
+        if root.page == 0 : HomeScreen {
             horizontal-stretch: 1;
             engine-status: root.engine-status;
             conn-state <=> root.conn-state;
@@ -71,7 +93,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        ServerList {
+        if root.page == 0 : ServerList {
             servers <=> root.servers;
             import-text <=> root.import-text;
             import-result <=> root.import-result;
@@ -80,6 +102,39 @@ export component AppWindow inherits Window {
             }
             pick(id) => {
                 root.pick(id);
+            }
+        }
+
+        if root.page == 1 : RoutesScreen {
+            horizontal-stretch: 1;
+            region: root.route-region;
+            presets: root.route-presets;
+            rows: root.route-rows;
+            busy-preset: root.busy-preset;
+            busy-route: root.busy-route;
+            busy-import: root.busy-import;
+            note: root.route-note;
+            note-bad: root.route-note-bad;
+            select-preset(id) => {
+                root.select-preset(id);
+            }
+            activate-route(id) => {
+                root.activate-route(id);
+            }
+            import-route(text) => {
+                root.import-route(text);
+            }
+            delete-route(id) => {
+                root.delete-route(id);
+            }
+            set-region(id) => {
+                root.set-region(id);
+            }
+            create-route() => {
+                root.create-route();
+            }
+            edit-route(id) => {
+                root.edit-route(id);
             }
         }
     }

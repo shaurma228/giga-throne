@@ -7,9 +7,10 @@
 use std::time::Duration;
 
 use slint::{ModelRc, VecModel};
-use throne_api::types::{ConnectionState, LiveStatsResponse, Profile, Status};
+use throne_api::types::{ConnectionState, LiveStatsResponse, Profile, Route, Status};
 
-use crate::{AppWindow, ServerItem};
+use crate::presets::{self, Preset};
+use crate::{AppWindow, PresetItem, RouteItem, ServerItem};
 
 /// A command that is in flight on the engine side, shown until it finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +51,71 @@ pub struct ServerRow {
     pub running: bool,
 }
 
+/// A routing command in flight, shown on its card or row until it finishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteBusy {
+    /// Choosing the preset with this id.
+    Preset(String),
+    /// Activating or deleting the route with this id.
+    Route(i64),
+    /// Adding what the import box holds.
+    Import,
+}
+
+/// The info or error line under the Routes screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RouteNote {
+    pub text: String,
+    /// Shown in the error color instead of the muted one.
+    pub bad: bool,
+}
+
+/// One ready-made mode card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresetCard {
+    pub id: String,
+    pub title: String,
+    pub desc: String,
+    pub source: String,
+    pub recommended: bool,
+    /// The active route is this mode.
+    pub selected: bool,
+    /// Can be chosen now. Only the "Всё через VPN" mode needs a route of its own.
+    pub available: bool,
+    /// Replaces the source line when the card is not available.
+    pub note: String,
+}
+
+/// One row of "Мои маршруты".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteRow {
+    pub id: i64,
+    pub name: String,
+    pub meta: String,
+    pub active: bool,
+}
+
+/// Everything the Routes screen shows. Busy values use `""` and `-1` for none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutesView {
+    /// Region id of the chip that is on.
+    pub region: String,
+    pub presets: Vec<PresetCard>,
+    pub rows: Vec<RouteRow>,
+    pub busy_preset: String,
+    pub busy_route: i64,
+    pub busy_import: bool,
+    pub note: RouteNote,
+}
+
 /// Everything the UI thread needs to draw one update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub home: HomeView,
     /// The whole server list, present only when the profiles changed.
     pub servers: Option<Vec<ServerRow>>,
+    /// The whole Routes screen, present only when something on it changed.
+    pub routes: Option<RoutesView>,
     pub import_result: String,
     pub error: String,
     /// Clear the import box (the last import succeeded).
@@ -138,6 +198,110 @@ pub fn server_row(profile: &Profile) -> ServerRow {
         ping_text: ping_text(profile.latency_ms),
         bars: ping_bars(profile.latency_ms),
         running: profile.running,
+    }
+}
+
+/// Russian plural of "правило": "1 правило", "3 правила", "7 правил".
+pub fn rules_text(count: u64) -> String {
+    let word = match (count % 10, count % 100) {
+        (1, n) if n != 11 => "правило",
+        (2..=4, n) if !(12..=14).contains(&n) => "правила",
+        _ => "правил",
+    };
+    format!("{count} {word}")
+}
+
+/// Time since `then` as "только что", "N мин назад", "N ч назад" or "N дн назад".
+/// `now` and `then` are epoch seconds; a time in the future counts as just now.
+pub fn ago_text(now: i64, then: i64) -> String {
+    let secs = now - then;
+    match secs {
+        s if s < 60 => "только что".to_owned(),
+        s if s < 3_600 => format!("{} мин назад", s / 60),
+        s if s < 86_400 => format!("{} ч назад", s / 3_600),
+        s => format!("{} дн назад", s / 86_400),
+    }
+}
+
+/// Second line of a route row: "свой · 7 правил", "по ссылке · обновлён 2 ч назад"
+/// or "по ссылке · ещё не загружен".
+pub fn route_meta(route: &Route, now: i64) -> String {
+    if route.remote {
+        if route.updated_at > 0 {
+            format!("по ссылке · обновлён {}", ago_text(now, route.updated_at))
+        } else {
+            "по ссылке · ещё не загружен".to_owned()
+        }
+    } else if route.raw {
+        "свой · JSON".to_owned()
+    } else {
+        format!("свой · {}", rules_text(route.rule_count))
+    }
+}
+
+/// Maps a route to a row of "Мои маршруты".
+pub fn route_row(route: &Route, active: Option<i64>, now: i64) -> RouteRow {
+    RouteRow {
+        id: route.id,
+        name: route.name.clone(),
+        meta: route_meta(route, now),
+        active: active == Some(route.id),
+    }
+}
+
+/// Maps a preset to its card. `active` is the id of the active route.
+pub fn preset_card(preset: &Preset, routes: &[Route], active: Option<i64>) -> PresetCard {
+    let selected = active.is_some_and(|id| {
+        routes
+            .iter()
+            .any(|route| route.id == id && presets::route_matches(route, preset))
+    });
+    let available = preset.file.is_some() || routes.iter().any(presets::is_default_route);
+    PresetCard {
+        id: preset.id.to_owned(),
+        title: preset.title.to_owned(),
+        desc: preset.desc.to_owned(),
+        source: preset.source.to_owned(),
+        recommended: preset.recommended,
+        selected,
+        available,
+        note: if available {
+            String::new()
+        } else {
+            "Нет профиля Default".to_owned()
+        },
+    }
+}
+
+/// Computes the Routes screen from the routes, the active id and the region.
+pub fn routes_view(
+    routes: &[Route],
+    active: Option<i64>,
+    region: &str,
+    busy: Option<&RouteBusy>,
+    note: &RouteNote,
+    now: i64,
+) -> RoutesView {
+    let region = presets::region_or_default(region);
+    RoutesView {
+        region: region.to_owned(),
+        presets: presets::in_region(region)
+            .map(|preset| preset_card(preset, routes, active))
+            .collect(),
+        rows: presets::my_routes(routes)
+            .into_iter()
+            .map(|route| route_row(route, active, now))
+            .collect(),
+        busy_preset: match busy {
+            Some(RouteBusy::Preset(id)) => id.clone(),
+            _ => String::new(),
+        },
+        busy_route: match busy {
+            Some(RouteBusy::Route(id)) => *id,
+            _ => -1,
+        },
+        busy_import: busy == Some(&RouteBusy::Import),
+        note: note.clone(),
     }
 }
 
@@ -228,6 +392,41 @@ pub fn home_view(
     }
 }
 
+fn preset_item(card: &PresetCard) -> PresetItem {
+    PresetItem {
+        id: card.id.as_str().into(),
+        title: card.title.as_str().into(),
+        desc: card.desc.as_str().into(),
+        source: card.source.as_str().into(),
+        note: card.note.as_str().into(),
+        recommended: card.recommended,
+        selected: card.selected,
+        available: card.available,
+    }
+}
+
+fn route_item(row: &RouteRow) -> RouteItem {
+    RouteItem {
+        id: i32::try_from(row.id).unwrap_or(-1),
+        name: row.name.as_str().into(),
+        meta: row.meta.as_str().into(),
+        active: row.active,
+    }
+}
+
+fn apply_routes(window: &AppWindow, view: RoutesView) {
+    window.set_route_region(view.region.as_str().into());
+    let cards: Vec<PresetItem> = view.presets.iter().map(preset_item).collect();
+    window.set_route_presets(ModelRc::new(VecModel::from(cards)));
+    let rows: Vec<RouteItem> = view.rows.iter().map(route_item).collect();
+    window.set_route_rows(ModelRc::new(VecModel::from(rows)));
+    window.set_busy_preset(view.busy_preset.as_str().into());
+    window.set_busy_route(i32::try_from(view.busy_route).unwrap_or(-1));
+    window.set_busy_import(view.busy_import);
+    window.set_route_note(view.note.text.as_str().into());
+    window.set_route_note_bad(view.note.bad);
+}
+
 /// Hands a frame to the Slint event loop. Never blocks.
 pub fn push(weak: &slint::Weak<AppWindow>, frame: Frame) {
     // Fails only after the event loop has exited, when nobody is left to show it.
@@ -256,6 +455,9 @@ fn apply(window: &AppWindow, frame: Frame) {
     if let Some(rows) = frame.servers {
         let items: Vec<ServerItem> = rows.iter().map(to_item).collect();
         window.set_servers(ModelRc::new(VecModel::from(items)));
+    }
+    if let Some(routes) = frame.routes {
+        apply_routes(window, routes);
     }
 }
 
@@ -353,6 +555,110 @@ mod tests {
         assert_eq!(untested.code, "··");
         assert_eq!(untested.ping_text, "—");
         assert_eq!(untested.bars, 0);
+    }
+
+    #[test]
+    fn rules_are_counted_in_russian() {
+        assert_eq!(rules_text(0), "0 правил");
+        assert_eq!(rules_text(1), "1 правило");
+        assert_eq!(rules_text(3), "3 правила");
+        assert_eq!(rules_text(7), "7 правил");
+        assert_eq!(rules_text(11), "11 правил");
+        assert_eq!(rules_text(22), "22 правила");
+        assert_eq!(rules_text(112), "112 правил");
+    }
+
+    #[test]
+    fn time_ago_has_four_steps() {
+        let now = 1_000_000;
+        assert_eq!(ago_text(now, now), "только что");
+        assert_eq!(ago_text(now, now - 59), "только что");
+        assert_eq!(ago_text(now, now - 60), "1 мин назад");
+        assert_eq!(ago_text(now, now - 3_599), "59 мин назад");
+        assert_eq!(ago_text(now, now - 7_200), "2 ч назад");
+        assert_eq!(ago_text(now, now - 86_399), "23 ч назад");
+        assert_eq!(ago_text(now, now - 172_800), "2 дн назад");
+        assert_eq!(ago_text(now, now + 500), "только что");
+    }
+
+    fn route(id: i64, name: &str) -> Route {
+        Route {
+            id,
+            name: name.to_owned(),
+            active: false,
+            remote: false,
+            remote_url: String::new(),
+            auto_update: false,
+            updated_at: 0,
+            raw: false,
+            rule_count: 0,
+        }
+    }
+
+    #[test]
+    fn route_meta_tells_local_from_remote() {
+        let mut local = route(1, "Работа");
+        local.rule_count = 7;
+        assert_eq!(route_meta(&local, 0), "свой · 7 правил");
+
+        let mut remote = route(2, "Списки");
+        remote.remote = true;
+        remote.remote_url = "https://example.com/x".to_owned();
+        assert_eq!(route_meta(&remote, 0), "по ссылке · ещё не загружен");
+        remote.updated_at = 1_000;
+        assert_eq!(
+            route_meta(&remote, 1_000 + 7_300),
+            "по ссылке · обновлён 2 ч назад"
+        );
+    }
+
+    #[test]
+    fn routes_view_partitions_and_marks_the_active_route() {
+        let mut blocked = route(5, "Proxy");
+        blocked.remote = true;
+        blocked.remote_url =
+            presets::preset_url(presets::find("ru-blocked").expect("preset")).expect("url");
+        let routes = vec![route(1, "Default"), blocked, route(2, "Работа")];
+        let view = routes_view(&routes, Some(5), "ru", None, &RouteNote::default(), 0);
+        assert_eq!(view.region, "ru");
+        assert_eq!(view.presets.len(), 5);
+        assert!(
+            view.presets
+                .iter()
+                .find(|p| p.id == "ru-blocked")
+                .expect("card")
+                .selected
+        );
+        assert!(
+            !view
+                .presets
+                .iter()
+                .find(|p| p.id == "ru-all")
+                .expect("card")
+                .selected
+        );
+        let rows: Vec<&str> = view.rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(rows, vec!["Работа"]);
+        assert!(!view.rows[0].active);
+    }
+
+    #[test]
+    fn all_mode_is_unavailable_without_default_and_busy_is_reported() {
+        let routes = vec![route(2, "Работа")];
+        let busy = RouteBusy::Preset("ru-refilter".to_owned());
+        let view = routes_view(&routes, None, "xx", Some(&busy), &RouteNote::default(), 0);
+        assert_eq!(view.region, "ru");
+        let all = &view.presets[0];
+        assert!(!all.available);
+        assert_eq!(all.note, "Нет профиля Default");
+        assert_eq!(view.busy_preset, "ru-refilter");
+        assert_eq!(view.busy_route, -1);
+        assert!(!view.busy_import);
+
+        let busy = RouteBusy::Route(2);
+        let view = routes_view(&routes, None, "ru", Some(&busy), &RouteNote::default(), 0);
+        assert_eq!(view.busy_route, 2);
+        assert!(view.busy_preset.is_empty());
     }
 
     #[test]

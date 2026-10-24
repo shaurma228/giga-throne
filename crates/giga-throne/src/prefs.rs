@@ -10,20 +10,28 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use crate::presets::DEFAULT_REGION;
+
 /// Name of the preferences file in our data root.
 const PREFS_FILE: &str = "prefs.json";
 
 /// What the user can change in the app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
     /// "Системный прокси": route the apps that use the system proxy through the VPN.
     pub system_proxy: bool,
+    /// Region chosen on the Routes screen ("ru", "cn" or "ir"). Files written
+    /// before it existed have none, so they get the default.
+    pub route_region: String,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { system_proxy: true }
+        Self {
+            system_proxy: true,
+            route_region: DEFAULT_REGION.to_owned(),
+        }
     }
 }
 
@@ -88,16 +96,25 @@ mod tests {
     }
 
     #[test]
+    fn file_without_route_region_keeps_the_other_settings() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = path(dir.path());
+        fs::write(&file, r#"{"system_proxy": false}"#).expect("write");
+        let prefs = load(&file);
+        assert!(!prefs.system_proxy);
+        assert_eq!(prefs.route_region, "ru");
+    }
+
+    #[test]
     fn save_then_load_round_trips() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("nested").join(PREFS_FILE);
-        save(
-            &file,
-            &Prefs {
-                system_proxy: false,
-            },
-        )
-        .expect("save");
+        let prefs = Prefs {
+            system_proxy: false,
+            route_region: "cn".to_owned(),
+        };
+        save(&file, &prefs).expect("save");
+        assert_eq!(load(&file), prefs);
         assert!(!load(&file).system_proxy);
         let text = fs::read_to_string(&file).expect("read");
         assert!(text.contains("\"system_proxy\": false"), "{text}");

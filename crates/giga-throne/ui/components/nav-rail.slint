@@ -1,6 +1,6 @@
 import { Theme } from "../theme.slint";
 
-// Left navigation column: logo and section switcher.
+// Left navigation column: logo and section switcher. `active` is the page index.
 export component NavRail inherits Rectangle {
     width: 72px;
     background: Theme.panel;
@@ -10,10 +10,11 @@ export component NavRail inherits Rectangle {
     VerticalLayout {
         padding-top: 16px;
         padding-bottom: 16px;
-        spacing: 12px;
+        spacing: 8px;
 
         HorizontalLayout {
             alignment: center;
+            padding-bottom: 8px;
 
             Rectangle {
                 width: 40px;
@@ -35,28 +36,39 @@ export component NavRail inherits Rectangle {
             }
         }
 
-        for label[i] in ["Дом", "Серв", "Прав", "Стат"]: HorizontalLayout {
+        // Icons from the design (docs/design/Routes.dc.html), drawn in a 24px box.
+        for item[i] in [
+            { label: "Главная", icon: "M 3 11 L 12 4 L 21 11 M 5 10 L 5 20 L 19 20 L 19 10", enabled: true },
+            { label: "Маршруты", icon: "M 6 3 L 6 21 M 6 9 A 6 6 0 0 0 12 15 L 18 15 M 15 12 L 18 15 L 15 18", enabled: true },
+            { label: "Статистика", icon: "M 5 20 L 5 11 M 12 20 L 12 4 M 19 20 L 19 14", enabled: false },
+        ] : HorizontalLayout {
             alignment: center;
 
             Rectangle {
                 width: 44px;
                 height: 44px;
                 border-radius: Theme.radius-s;
-                background: root.active == i ? Theme.raised : transparent;
+                background: root.active == i && item.enabled ? Theme.raised : transparent;
+                accessible-role: button;
+                accessible-label: item.label;
+                accessible-enabled: item.enabled;
 
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: label;
-                    color: root.active == i ? Theme.accent : Theme.muted;
-                    font-family: Theme.font-body;
-                    font-size: 12px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                Path {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    commands: item.icon;
+                    stroke: !item.enabled ? Theme.line : root.active == i ? Theme.accent : Theme.muted;
+                    stroke-width: 2px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    fill: transparent;
                 }
 
                 TouchArea {
+                    enabled: item.enabled;
+                    mouse-cursor: item.enabled ? pointer : default;
                     clicked => {
                         root.active = i;
                     }

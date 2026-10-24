@@ -1,0 +1,567 @@
+import { Theme } from "../theme.slint";
+import { GtInput } from "../components/text-input.slint";
+
+// One ready-made mode card. Built in Rust (src/view.rs).
+export struct PresetItem {
+    id: string,
+    title: string,
+    desc: string,
+    source: string,
+    note: string,
+    recommended: bool,
+    selected: bool,
+    available: bool,
+}
+
+// One row of "Мои маршруты". Built in Rust (src/view.rs).
+export struct RouteItem {
+    id: int,
+    name: string,
+    meta: string,
+    active: bool,
+}
+
+// A ready-made mode: title, description, list name and a "recommended" badge.
+component PresetCard inherits Rectangle {
+    in property <PresetItem> item;
+    in property <bool> busy;
+
+    callback pick();
+
+    min-height: 118px;
+    border-radius: Theme.radius-m;
+    border-width: 1.5px;
+    border-color: item.selected ? Theme.accent : Theme.raised;
+    background: item.selected ? Theme.connect-off : Theme.panel;
+    opacity: item.available ? 1 : 0.5;
+
+    animate border-color {
+        duration: Theme.anim-fast;
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: item.title;
+                color: Theme.text;
+                font-family: Theme.font-body;
+                font-size: 15px;
+                font-weight: 800;
+                overflow: elide;
+            }
+
+            if root.busy : Text {
+                text: "…";
+                color: Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 15px;
+                font-weight: 800;
+            }
+
+            if !root.busy && item.recommended : Rectangle {
+                height: 22px;
+                width: 110px;
+                border-radius: 6px;
+                background: Theme.accent.with-alpha(0.14);
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "рекомендуем";
+                    color: Theme.accent;
+                    font-family: Theme.font-body;
+                    font-size: 11px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Text {
+            text: item.desc;
+            color: Theme.text-2;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: item.note != "" ? item.note : item.source;
+            color: item.note != "" ? Theme.ping-bad : Theme.muted;
+            font-family: Theme.font-mono;
+            font-size: 11px;
+            overflow: elide;
+        }
+    }
+
+    TouchArea {
+        enabled: root.item.available;
+        mouse-cursor: pointer;
+        clicked => {
+            root.pick();
+        }
+    }
+}
+
+// "Свой маршрут": a dashed card in the design, drawn here with a solid border.
+component CreateCard inherits Rectangle {
+    callback pick();
+
+    min-height: 118px;
+    border-radius: Theme.radius-m;
+    border-width: 1.5px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            Path {
+                width: 24px;
+                height: 24px;
+                commands: "M 12 5 L 12 19 M 5 12 L 19 12";
+                stroke: Theme.text;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                fill: transparent;
+            }
+        }
+
+        Text {
+            text: "Свой маршрут";
+            color: Theme.text;
+            font-family: Theme.font-body;
+            font-size: 14px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.pick();
+        }
+    }
+}
+
+// Routing screen: region chips, ready-made modes and the user's own routes.
+// All texts come from Rust (src/view.rs) except the static labels below.
+export component RoutesScreen inherits Rectangle {
+    in-out property <string> region: "ru";
+    in property <[PresetItem]> presets;
+    in property <[RouteItem]> rows;
+    in property <string> busy-preset;
+    in property <int> busy-route: -1;
+    in property <bool> busy-import;
+    in property <string> note;
+    in property <bool> note-bad;
+
+    callback select-preset(string);
+    callback activate-route(int);
+    callback import-route(string);
+    callback delete-route(int);
+    callback set-region(string);
+    callback create-route();
+    callback edit-route(int);
+
+    // Import box is hidden until "Импорт ссылки" is pressed.
+    property <bool> import-open: false;
+    property <string> import-text;
+    // Id of the route whose "Удалить" was pressed once; a second press deletes it.
+    property <int> confirm-id: -1;
+
+    background: Theme.bg;
+
+    // Disarms the delete confirmation after 3 s.
+    confirm := Timer {
+        interval: 3s;
+        triggered => {
+            root.confirm-id = -1;
+            self.stop();
+        }
+    }
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        interactive: true;
+        content-height: content.preferred-height;
+
+        content := VerticalLayout {
+            width: parent.width;
+            padding-top: 28px;
+            padding-bottom: 28px;
+            padding-left: 32px;
+            padding-right: 32px;
+            spacing: 20px;
+
+            HorizontalLayout {
+                alignment: space-between;
+                spacing: 16px;
+
+                VerticalLayout {
+                    spacing: 6px;
+                    alignment: end;
+
+                    Text {
+                        text: "Маршруты";
+                        color: Theme.text;
+                        font-family: Theme.font-display;
+                        font-size: 26px;
+                        font-weight: 700;
+                    }
+
+                    Text {
+                        text: "Что идёт через VPN, а что — напрямую";
+                        color: Theme.text-2;
+                        font-family: Theme.font-body;
+                        font-size: 14px;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 6px;
+
+                    for chip in [
+                        { id: "ru", label: "Россия" },
+                        { id: "cn", label: "Китай" },
+                        { id: "ir", label: "Иран" },
+                    ] : Rectangle {
+                        width: 84px;
+                        height: 34px;
+                        border-radius: 17px;
+                        border-width: 1px;
+                        border-color: root.region == chip.id ? Theme.text : Theme.line;
+                        background: root.region == chip.id ? Theme.text : transparent;
+                        accessible-role: button;
+                        accessible-label: chip.label;
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: chip.label;
+                            color: root.region == chip.id ? Theme.bg : Theme.text-2;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.set-region(chip.id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 10px;
+
+                Text {
+                    text: "Готовые режимы".to-uppercase();
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+
+                VerticalLayout {
+                    spacing: 12px;
+
+                    // Two rows of three; a row with no card (and no "Свой маршрут") has no height.
+                    for r in [0, 1] : Rectangle {
+                        height: r * 3 <= root.presets.length ? row.preferred-height : 0px;
+                        clip: true;
+
+                        row := HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+
+                        for c in [0, 1, 2] : Rectangle {
+                            horizontal-stretch: 1;
+                            min-height: 118px;
+
+                            if r * 3 + c < root.presets.length : PresetCard {
+                                item: root.presets[r * 3 + c];
+                                busy: root.busy-preset == root.presets[r * 3 + c].id;
+                                pick => {
+                                    root.select-preset(root.presets[r * 3 + c].id);
+                                }
+                            }
+
+                            if r * 3 + c == root.presets.length : CreateCard {
+                                pick => {
+                                    root.create-route();
+                                }
+                            }
+                        }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 10px;
+
+                HorizontalLayout {
+                    alignment: space-between;
+
+                    Text {
+                        text: "Мои маршруты".to-uppercase();
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 12px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        width: 150px;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        accessible-role: button;
+                        accessible-label: "Импорт ссылки";
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: "Импорт ссылки";
+                            color: Theme.text;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.import-open = !root.import-open;
+                            }
+                        }
+                    }
+                }
+
+                if root.import-open : HorizontalLayout {
+                    spacing: 8px;
+
+                    GtInput {
+                        horizontal-stretch: 1;
+                        text <=> root.import-text;
+                        placeholder: "throne://route/…, throne://remoteroute/… или https://…";
+                        accepted(text) => {
+                            root.import-route(text);
+                        }
+                    }
+
+                    Rectangle {
+                        width: 100px;
+                        height: 40px;
+                        border-radius: 12px;
+                        background: Theme.accent;
+                        opacity: root.busy-import ? 0.5 : 1;
+                        accessible-role: button;
+                        accessible-label: "Добавить";
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: root.busy-import ? "…" : "Добавить";
+                            color: Theme.on-accent;
+                            font-family: Theme.font-body;
+                            font-size: 14px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if !root.busy-import {
+                                    root.import-route(root.import-text);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.rows.length == 0 : Text {
+                    text: "Своих маршрутов пока нет";
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                }
+
+                for m in root.rows : Rectangle {
+                    height: 56px;
+                    border-radius: Theme.radius-m;
+                    border-width: 1.5px;
+                    border-color: m.active ? Theme.accent : Theme.raised;
+                    background: m.active ? Theme.connect-off : Theme.panel;
+                    opacity: root.busy-route == m.id ? 0.5 : 1;
+
+                    // Behind the row content: a click on the name or the radio activates the route.
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.activate-route(m.id);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 12px;
+                        spacing: 12px;
+
+                        Rectangle {
+                            width: 18px;
+                            height: 18px;
+                            border-radius: 9px;
+                            border-width: m.active ? 5px : 2px;
+                            border-color: m.active ? Theme.accent : Theme.muted;
+                            background: transparent;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+
+                            Text {
+                                text: m.name;
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 14px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: m.meta;
+                                color: Theme.muted;
+                                font-family: Theme.font-body;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 92px;
+                            height: 32px;
+                            border-radius: 10px;
+                            background: Theme.raised;
+                            accessible-role: button;
+                            accessible-label: "Изменить";
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "Изменить";
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.edit-route(m.id);
+                                }
+                            }
+                        }
+
+                        // Delete with a confirmation: the first press shows "Точно?" for 3 s.
+                        Rectangle {
+                            width: root.confirm-id == m.id ? 84px : 36px;
+                            height: 36px;
+                            border-radius: 10px;
+                            background: root.confirm-id == m.id ? Theme.ping-bad.with-alpha(0.14) : transparent;
+                            accessible-role: button;
+                            accessible-label: root.confirm-id == m.id ? "Точно удалить маршрут" : "Удалить маршрут";
+
+                            animate width {
+                                duration: Theme.anim-fast;
+                            }
+
+                            if root.confirm-id != m.id : HorizontalLayout {
+                                alignment: center;
+
+                                Path {
+                                    width: 22px;
+                                    height: 22px;
+                                    commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
+                                    stroke: Theme.muted;
+                                    stroke-width: 2px;
+                                    stroke-line-cap: round;
+                                    stroke-line-join: round;
+                                    fill: transparent;
+                                }
+                            }
+
+                            if root.confirm-id == m.id : Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "Точно?";
+                                color: Theme.ping-bad;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if root.confirm-id == m.id {
+                                        root.confirm-id = -1;
+                                        confirm.stop();
+                                        root.delete-route(m.id);
+                                    } else {
+                                        root.confirm-id = m.id;
+                                        confirm.restart();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Info or error line of the last action.
+            if root.note != "" : Text {
+                text: root.note;
+                color: root.note-bad ? Theme.ping-bad : Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

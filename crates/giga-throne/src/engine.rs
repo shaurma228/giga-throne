@@ -11,14 +11,15 @@
 //! Nothing runs until the sidecar reports [`SidecarState::Ready`]. Every
 //! transition to Ready re-checks the ports Throne listens on.
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use throne_api::types::{
     ConnectionState, GetSettingsResponse, ImportResponse, InboundStatus, LiveStatsResponse,
-    Profile, ProfilesResponse, SettingsMap, Status,
+    Profile, ProfilesResponse, Route, SettingsMap, Status,
 };
 use throne_api::{Client, Error, Method};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -27,9 +28,13 @@ use tokio::time::{interval_at, sleep};
 use tracing::{debug, info, warn};
 
 use crate::prefs::{self, Prefs};
+use crate::presets::{self, ImportKind, PresetPlan};
 use crate::sidecar::SidecarState;
 use crate::sysproxy::{proxy_host, SystemProxy};
-use crate::view::{home_view, server_row, Frame, HomeView, Pending, ServerRow};
+use crate::view::{
+    home_view, routes_view, server_row, Frame, HomeView, Pending, RouteBusy, RouteNote, RoutesView,
+    ServerRow,
+};
 use crate::AppWindow;
 
 /// Interval of the status and live-stats poll.
@@ -49,6 +54,16 @@ const IMPORT_WAIT_SECS: u64 = 60;
 
 /// Shown while the system proxy is wanted but Throne's local proxy is switched off.
 const INBOUND_OFF_TEXT: &str = "Локальный прокси выключен в настройках движка";
+
+/// Shown when the engine has no routing API: a stock Throne, not our fork.
+const ROUTES_API_MISSING_TEXT: &str =
+    "Этой версии движка не хватает API маршрутов — нужен Throne из форка (feat/route-api)";
+
+/// Shown by the route editor placeholders until the editor exists.
+const EDITOR_SOON_TEXT: &str = "Редактор маршрутов будет в следующей версии";
+
+/// Shown when a route command arrives before the engine is ready.
+const ENGINE_NOT_READY_TEXT: &str = "Движок ещё не готов";
 
 /// Settings that name a loopback port Throne binds.
 const PORT_SETTINGS: [&str; 4] = [
@@ -72,6 +87,20 @@ pub enum Command {
     Import(String),
     /// Flip the "Системный прокси" preference.
     ToggleSystemProxy,
+    /// Make the ready-made mode with this id the active one, adding its list first if needed.
+    SelectPreset(String),
+    /// Make this route the active one.
+    ActivateRoute(i64),
+    /// Add what the Routes import box holds: a route link or remote lists.
+    ImportRoute(String),
+    /// Delete this route.
+    DeleteRoute(i64),
+    /// Show another region's presets and remember the choice.
+    SetRegion(String),
+    /// "Свой маршрут": the editor is not there yet.
+    CreateRoute,
+    /// "Изменить": the editor is not there yet.
+    EditRoute(i64),
 }
 
 /// Connects the UI callbacks of `window` to commands. The receiver goes to [`run`].
@@ -88,6 +117,34 @@ pub fn bind_callbacks(window: &AppWindow) -> UnboundedReceiver<Command> {
     let sysproxy = tx.clone();
     window.on_toggle_sysproxy(move || {
         let _ = sysproxy.send(Command::ToggleSystemProxy);
+    });
+    let select = tx.clone();
+    window.on_select_preset(move |id| {
+        let _ = select.send(Command::SelectPreset(id.to_string()));
+    });
+    let activate = tx.clone();
+    window.on_activate_route(move |id| {
+        let _ = activate.send(Command::ActivateRoute(i64::from(id)));
+    });
+    let import_route = tx.clone();
+    window.on_import_route(move |text| {
+        let _ = import_route.send(Command::ImportRoute(text.to_string()));
+    });
+    let delete = tx.clone();
+    window.on_delete_route(move |id| {
+        let _ = delete.send(Command::DeleteRoute(i64::from(id)));
+    });
+    let region = tx.clone();
+    window.on_set_region(move |id| {
+        let _ = region.send(Command::SetRegion(id.to_string()));
+    });
+    let create = tx.clone();
+    window.on_create_route(move || {
+        let _ = create.send(Command::CreateRoute);
+    });
+    let edit = tx.clone();
+    window.on_edit_route(move |id| {
+        let _ = edit.send(Command::EditRoute(i64::from(id)));
     });
     window.on_import_link(move |text| {
         let _ = tx.send(Command::Import(text.to_string()));
@@ -214,6 +271,10 @@ impl Engine {
                 Ok(list) => self.shared.update(|st| st.set_profiles(list.profiles)),
                 Err(err) => debug!("profiles poll failed: {err}"),
             }
+            match self.client.routes().await {
+                Ok(routes) => self.shared.update(|st| st.routes = routes),
+                Err(err) => debug!("routes poll failed: {err}"),
+            }
         }
     }
 
@@ -232,6 +293,29 @@ impl Engine {
             Command::Connect(id) => self.report_connection(self.connect(id).await),
             Command::Import(text) => self.import(&text).await,
             Command::ToggleSystemProxy => self.toggle_system_proxy(),
+            Command::SelectPreset(id) => {
+                let work = self.select_preset(&id);
+                let result = self.while_busy(RouteBusy::Preset(id.clone()), work).await;
+                self.report_route(result);
+            }
+            Command::ActivateRoute(id) => {
+                let work = self.activate_route(id);
+                let result = self.while_busy(RouteBusy::Route(id), work).await;
+                self.report_route(result);
+            }
+            Command::ImportRoute(text) => {
+                let work = self.import_route(&text);
+                let result = self.while_busy(RouteBusy::Import, work).await;
+                self.report_route(result);
+            }
+            Command::DeleteRoute(id) => {
+                let work = self.delete_route(id);
+                let result = self.while_busy(RouteBusy::Route(id), work).await;
+                self.report_route(result);
+            }
+            Command::SetRegion(region) => self.set_region(&region),
+            Command::CreateRoute => self.report_route(Ok(EDITOR_SOON_TEXT.to_owned())),
+            Command::EditRoute(_) => self.report_route(Ok(EDITOR_SOON_TEXT.to_owned())),
         }
         let status = self.shared.read(|st| st.status.clone());
         self.sync_system_proxy(status.as_ref());
@@ -240,13 +324,115 @@ impl Engine {
 
     /// Flips the "Системный прокси" preference and saves it. The caller syncs the proxy.
     pub fn toggle_system_proxy(&self) {
-        let prefs = Prefs {
-            system_proxy: !self.shared.read(|st| st.prefs.system_proxy),
-        };
+        let prefs = self.shared.read(|st| Prefs {
+            system_proxy: !st.prefs.system_proxy,
+            ..st.prefs.clone()
+        });
+        self.save_prefs(prefs);
+    }
+
+    /// Saves the preferences and makes them the current ones.
+    fn save_prefs(&self, prefs: Prefs) {
         if let Err(err) = prefs::save(&self.prefs_path, &prefs) {
             warn!("could not save preferences: {err}");
         }
         self.shared.update(|st| st.prefs = prefs);
+    }
+
+    /// Remembers the region of the Routes screen. Unknown regions are ignored.
+    fn set_region(&self, region: &str) {
+        if !presets::is_region(region) {
+            return;
+        }
+        let prefs = self.shared.read(|st| Prefs {
+            route_region: region.to_owned(),
+            ..st.prefs.clone()
+        });
+        self.save_prefs(prefs);
+    }
+
+    /// Shows `busy` on the Routes screen while `work` runs.
+    async fn while_busy<T>(&self, busy: RouteBusy, work: impl Future<Output = T>) -> T {
+        self.shared.update(|st| st.route_busy = Some(busy));
+        let result = work.await;
+        self.shared.update(|st| st.route_busy = None);
+        result
+    }
+
+    /// Shows the result of a routing command under the Routes screen.
+    fn report_route(&self, result: Result<String, String>) {
+        match result {
+            Ok(text) => flash(&self.shared, Flash::Routes { bad: false }, text),
+            Err(text) => {
+                warn!("routing command failed: {text}");
+                flash(&self.shared, Flash::Routes { bad: true }, text);
+            }
+        }
+    }
+
+    /// Chooses a ready-made mode. Activates its route, or adds its list first.
+    ///
+    /// Returns the text for the Routes screen: empty on success, the error otherwise.
+    async fn select_preset(&self, id: &str) -> Result<String, String> {
+        let Some(preset) = presets::find(id) else {
+            return Err("Неизвестный режим".to_owned());
+        };
+        let routes = self.shared.read(|st| st.routes.clone());
+        match presets::plan_preset(&routes, preset) {
+            PresetPlan::Activate(route_id) => self.activate_route(route_id).await,
+            PresetPlan::AddThenActivate(url) => {
+                let added = self
+                    .client
+                    .add_remote_routes(&url, true)
+                    .await
+                    .map_err(|err| route_error_text(&err, true))?;
+                let route_id = presets::pick_added_route(&added, &url)?;
+                self.activate_route(route_id).await
+            }
+            PresetPlan::Unavailable => Err(NO_DEFAULT_ROUTE_TEXT.to_owned()),
+        }
+    }
+
+    async fn activate_route(&self, id: i64) -> Result<String, String> {
+        match self.client.set_active_route(id).await {
+            Ok(status) => {
+                self.shared.update(|st| st.set_status(status));
+                Ok(String::new())
+            }
+            Err(err) => Err(route_error_text(&err, false)),
+        }
+    }
+
+    /// Adds what the import box holds: a route link, or remote lists.
+    async fn import_route(&self, text: &str) -> Result<String, String> {
+        let text = text.trim();
+        match presets::classify_import(text) {
+            ImportKind::Link => self
+                .client
+                .add_route_link(text)
+                .await
+                .map(|added| format!("Добавлено: {}", added.routes.len()))
+                .map_err(|err| route_error_text(&err, true)),
+            ImportKind::Remote => self
+                .client
+                .add_remote_routes(text, true)
+                .await
+                .map(|added| {
+                    let failed = added.results.iter().filter(|result| !result.ok).count();
+                    route_summary(added.routes.len(), failed)
+                })
+                .map_err(|err| route_error_text(&err, true)),
+            ImportKind::Invalid => Err("Это не похоже на ссылку маршрута".to_owned()),
+        }
+    }
+
+    async fn delete_route(&self, id: i64) -> Result<String, String> {
+        // Only a route we know exists can make a 404 mean a missing endpoint.
+        let known = self.shared.read(|st| st.routes.iter().any(|r| r.id == id));
+        match self.client.delete_route(id).await {
+            Ok(()) => Ok("Маршрут удалён".to_owned()),
+            Err(err) => Err(route_error_text(&err, known)),
+        }
     }
 
     /// Makes the desktop proxy match the preference and the engine state.
@@ -464,12 +650,18 @@ async fn command_loop(
     while let Some(command) = commands.recv().await {
         let ready = is_ready(&state.borrow());
         if !ready {
-            if command == Command::ToggleSystemProxy {
-                // The switch is local: with no engine running, the proxy must be off.
-                engine.toggle_system_proxy();
-                engine.sync_system_proxy(None);
-            } else {
-                flash_error(&engine.shared, "Движок ещё не готов".to_owned());
+            match command {
+                // Local settings: they do not need the engine.
+                Command::ToggleSystemProxy => {
+                    // With no engine running, the proxy must be off.
+                    engine.toggle_system_proxy();
+                    engine.sync_system_proxy(None);
+                }
+                Command::SetRegion(region) => engine.set_region(&region),
+                Command::Toggle | Command::Connect(_) | Command::Import(_) => {
+                    flash_error(&engine.shared, ENGINE_NOT_READY_TEXT.to_owned());
+                }
+                _ => engine.report_route(Err(ENGINE_NOT_READY_TEXT.to_owned())),
             }
             continue;
         }
@@ -484,6 +676,8 @@ enum Flash {
     Home,
     /// The line under the import box.
     Import,
+    /// The info or error line of the Routes screen.
+    Routes { bad: bool },
 }
 
 /// Shows an error text for [`ERROR_SHOWN_FOR`], unless a newer one replaces it.
@@ -509,6 +703,11 @@ fn flash(shared: &Arc<Shared>, target: Flash, text: String) {
             seq = st.import_seq;
             st.import_result = text;
         }
+        Flash::Routes { bad } => {
+            st.route_seq += 1;
+            seq = st.route_seq;
+            st.route_note = RouteNote { text, bad };
+        }
     });
     let shared = Arc::clone(shared);
     tokio::spawn(async move {
@@ -516,6 +715,7 @@ fn flash(shared: &Arc<Shared>, target: Flash, text: String) {
         shared.update(|st| match target {
             Flash::Home if st.error_seq == seq => st.error.clear(),
             Flash::Import if st.import_seq == seq => st.import_result.clear(),
+            Flash::Routes { .. } if st.route_seq == seq => st.route_note = RouteNote::default(),
             _ => {}
         });
     });
@@ -592,6 +792,12 @@ struct State {
     status: Option<Status>,
     stats: Option<LiveStatsResponse>,
     profiles: Vec<Profile>,
+    routes: Vec<Route>,
+    /// The Routes screen as last sent to the UI, to send it again only when it changes.
+    routes_sent: Option<RoutesView>,
+    route_busy: Option<RouteBusy>,
+    route_note: RouteNote,
+    route_seq: u64,
     pending: Option<Pending>,
     prefs: Prefs,
     /// Profile id and start time of the current session, while running.
@@ -625,6 +831,29 @@ impl State {
         }
     }
 
+    /// The Routes screen, when it differs from the one last sent.
+    fn routes_frame(&mut self) -> Option<RoutesView> {
+        let active = self
+            .status
+            .as_ref()
+            .and_then(|s| s.route.as_ref())
+            .map(|route| route.id)
+            .or_else(|| self.routes.iter().find(|r| r.active).map(|r| r.id));
+        let view = routes_view(
+            &self.routes,
+            active,
+            &self.prefs.route_region,
+            self.route_busy.as_ref(),
+            &self.route_note,
+            now_secs(),
+        );
+        if self.routes_sent.as_ref() == Some(&view) {
+            return None;
+        }
+        self.routes_sent = Some(view.clone());
+        Some(view)
+    }
+
     /// Builds the frame for the UI. The server list is sent only when it changed.
     fn frame(&mut self) -> Frame {
         let timer = self
@@ -645,10 +874,12 @@ impl State {
                 .map(server_row)
                 .collect::<Vec<ServerRow>>()
         });
+        let routes = self.routes_frame();
         let clear_import = std::mem::take(&mut self.clear_import);
         Frame {
             home,
             servers,
+            routes,
             import_result: self.import_result.clone(),
             error: self.error.clone(),
             clear_import,
@@ -682,6 +913,22 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         read(&st)
+    }
+}
+
+/// Seconds since the Unix epoch, for the "N мин назад" texts.
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0))
+}
+
+/// Text under the import box after adding `added` profiles, `failed` of them with errors.
+fn route_summary(added: usize, failed: usize) -> String {
+    if failed > 0 {
+        format!("Добавлено: {added}, с ошибками: {failed}")
+    } else {
+        format!("Добавлено: {added}")
     }
 }
 
@@ -750,6 +997,29 @@ pub fn import_summary(response: &ImportResponse) -> String {
         format!("Добавлено: {imported}, с ошибками: {failed}")
     } else {
         format!("Добавлено: {imported}")
+    }
+}
+
+/// Shown when the "Всё через VPN" mode has no "Default" profile to activate.
+const NO_DEFAULT_ROUTE_TEXT: &str = "Нет профиля Default";
+
+/// Russian text for a failed routing request.
+///
+/// `endpoint_missing` says that a 404 means the routing endpoint itself is not
+/// there, so the engine is not our fork. Other errors use [`error_text`].
+pub fn route_error_text(err: &Error, endpoint_missing: bool) -> String {
+    match err {
+        Error::Api { status: 404, .. } if endpoint_missing => ROUTES_API_MISSING_TEXT.to_owned(),
+        Error::Api { code, .. } => match code.as_str() {
+            "not_found" => "Маршрут не найден".to_owned(),
+            "route_active" => "Сначала выбери другой маршрут".to_owned(),
+            "last_route" => "Нельзя удалить последний маршрут".to_owned(),
+            "remote_route" => "Этот маршрут обновляется по ссылке и не редактируется".to_owned(),
+            "not_remote" => "Этот маршрут не загружается по ссылке".to_owned(),
+            "editing" => "Маршруты открыты в редакторе Throne".to_owned(),
+            _ => error_text(err),
+        },
+        _ => error_text(err),
     }
 }
 
