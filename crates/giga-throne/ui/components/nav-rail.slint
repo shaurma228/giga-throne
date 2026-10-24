@@ -5,7 +5,10 @@ export component NavRail inherits Rectangle {
     width: 72px;
     background: Theme.panel;
 
-    in-out property <int> active: 0;
+    in property <int> active: 0;
+
+    // A click asks for the page; the window decides (the editor may hold unsaved changes).
+    callback navigate(int);
 
     VerticalLayout {
         padding-top: 16px;
@@ -70,7 +73,7 @@ export component NavRail inherits Rectangle {
                     enabled: item.enabled;
                     mouse-cursor: item.enabled ? pointer : default;
                     clicked => {
-                        root.active = i;
+                        root.navigate(i);
                     }
                 }
             }

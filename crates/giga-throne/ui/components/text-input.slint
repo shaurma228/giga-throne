@@ -5,15 +5,21 @@ import { Theme } from "../theme.slint";
 export component GtInput inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder;
+    // Text look: the defaults are the field of the forms; the editor's name uses a larger one.
+    in property <length> text-size: 14px;
+    in property <string> text-font: Theme.font-body;
+    in property <int> text-weight: 400;
+    // A flat field has no box: it is a title that can be typed in.
+    in property <bool> flat: false;
 
     callback accepted(string);
 
     height: 40px;
     min-width: 1px;
     border-radius: 12px;
-    border-width: 1.5px;
+    border-width: root.flat ? 0px : 1.5px;
     border-color: ti.has-focus ? Theme.accent : Theme.line;
-    background: Theme.bg;
+    background: root.flat ? transparent : Theme.bg;
     clip: true;
     forward-focus: ti;
 
@@ -46,8 +52,9 @@ export component GtInput inherits Rectangle {
             text: root.placeholder;
             visible: root.text == "";
             color: Theme.muted;
-            font-family: Theme.font-body;
-            font-size: 14px;
+            font-family: root.text-font;
+            font-size: root.text-size;
+            font-weight: root.text-weight;
             vertical-alignment: center;
         }
 
@@ -61,8 +68,9 @@ export component GtInput inherits Rectangle {
             single-line: true;
             text <=> root.text;
             color: Theme.text;
-            font-family: Theme.font-body;
-            font-size: 14px;
+            font-family: root.text-font;
+            font-size: root.text-size;
+            font-weight: root.text-weight;
             selection-background-color: Theme.accent;
             selection-foreground-color: Theme.on-accent;
 

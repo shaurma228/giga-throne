@@ -1,6 +1,7 @@
 //! giga-throne: desktop UI for the Throne engine.
 
 mod app;
+mod editor_ui;
 mod engine;
 mod prefs;
 mod presets;

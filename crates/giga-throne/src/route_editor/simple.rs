@@ -107,16 +107,6 @@ pub enum SimpleKind {
 }
 
 impl SimpleKind {
-    const ALL: [SimpleKind; 7] = [
-        SimpleKind::Domain,
-        SimpleKind::DomainSuffix,
-        SimpleKind::DomainKeyword,
-        SimpleKind::DomainRegex,
-        SimpleKind::IpCidr,
-        SimpleKind::RuleSet,
-        SimpleKind::ProcessName,
-    ];
-
     /// The condition, that is the rule field, the value is stored in.
     pub fn cond(self) -> CondKind {
         match self {

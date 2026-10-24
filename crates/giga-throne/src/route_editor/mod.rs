@@ -9,9 +9,6 @@
 //! editor does not know) comes back as it was read, so `to_share` of a fresh
 //! model is the profile itself.
 
-// The routing screen does not use the editor yet. Remove this when it does.
-#![allow(dead_code, unused_imports)]
-
 mod advanced;
 mod rules;
 mod simple;
@@ -22,11 +19,9 @@ mod fixtures;
 
 use throne_api::types::{Outbound, RouteRule, RouteShare};
 
-pub use advanced::{CondKind, CondView};
-pub use rules::{ActionView, Origin, RuleView};
-pub use simple::{
-    available_ready_lists, classify, Bucket, ReadyList, SimpleItem, SimpleKind, READY_LISTS,
-};
+pub use advanced::CondKind;
+pub use rules::{ActionView, RuleView};
+pub use simple::{available_ready_lists, Bucket, SimpleKind};
 
 /// A routing profile being edited.
 #[derive(Debug, Clone)]

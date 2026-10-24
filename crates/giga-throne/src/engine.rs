@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
+use throne_api::types::RouteShare;
 use throne_api::types::{
     ConnectionState, GetSettingsResponse, ImportResponse, InboundStatus, LiveStatsResponse,
     Profile, ProfilesResponse, Route, SettingsMap, Status,
@@ -27,6 +28,7 @@ use tokio::sync::{watch, Notify};
 use tokio::time::{interval_at, sleep};
 use tracing::{debug, info, warn};
 
+use crate::editor_ui::{self, EditorEvent, SavePlan};
 use crate::prefs::{self, Prefs};
 use crate::presets::{self, ImportKind, PresetPlan};
 use crate::sidecar::SidecarState;
@@ -59,8 +61,8 @@ const INBOUND_OFF_TEXT: &str = "Локальный прокси выключен
 const ROUTES_API_MISSING_TEXT: &str =
     "Этой версии движка не хватает API маршрутов — нужен Throne из форка (feat/route-api)";
 
-/// Shown by the route editor placeholders until the editor exists.
-const EDITOR_SOON_TEXT: &str = "Редактор маршрутов будет в следующей версии";
+/// Text of the Routes note after a saved profile.
+const SAVED_TEXT: &str = "Сохранено";
 
 /// Shown when a route command arrives before the engine is ready.
 const ENGINE_NOT_READY_TEXT: &str = "Движок ещё не готов";
@@ -97,10 +99,14 @@ pub enum Command {
     DeleteRoute(i64),
     /// Show another region's presets and remember the choice.
     SetRegion(String),
-    /// "Свой маршрут": the editor is not there yet.
-    CreateRoute,
-    /// "Изменить": the editor is not there yet.
-    EditRoute(i64),
+    /// Opens the route editor on this route, or on a new one for `None`.
+    OpenRouteEditor(Option<i64>),
+    /// Saves what the editor holds. `as_copy` saves a remote profile as a new local one.
+    SaveRoute {
+        id: Option<i64>,
+        share: RouteShare,
+        as_copy: bool,
+    },
 }
 
 /// Connects the UI callbacks of `window` to commands. The receiver goes to [`run`].
@@ -140,12 +146,13 @@ pub fn bind_callbacks(window: &AppWindow) -> UnboundedReceiver<Command> {
     });
     let create = tx.clone();
     window.on_create_route(move || {
-        let _ = create.send(Command::CreateRoute);
+        let _ = create.send(Command::OpenRouteEditor(None));
     });
     let edit = tx.clone();
     window.on_edit_route(move |id| {
-        let _ = edit.send(Command::EditRoute(i64::from(id)));
+        let _ = edit.send(Command::OpenRouteEditor(Some(i64::from(id))));
     });
+    editor_ui::bind(window, tx.clone());
     window.on_import_link(move |text| {
         let _ = tx.send(Command::Import(text.to_string()));
     });
@@ -314,8 +321,8 @@ impl Engine {
                 self.report_route(result);
             }
             Command::SetRegion(region) => self.set_region(&region),
-            Command::CreateRoute => self.report_route(Ok(EDITOR_SOON_TEXT.to_owned())),
-            Command::EditRoute(_) => self.report_route(Ok(EDITOR_SOON_TEXT.to_owned())),
+            Command::OpenRouteEditor(id) => self.open_route_editor(id).await,
+            Command::SaveRoute { id, share, as_copy } => self.save_route(id, share, as_copy).await,
         }
         let status = self.shared.read(|st| st.status.clone());
         self.sync_system_proxy(status.as_ref());
@@ -433,6 +440,97 @@ impl Engine {
                 })
                 .map_err(|err| route_error_text(&err, true)),
             ImportKind::Invalid => Err("Это не похоже на ссылку маршрута".to_owned()),
+        }
+    }
+
+    /// Loads what the route editor opens on and hands it to the UI. A route that
+    /// cannot be read shows its error under the Routes screen instead.
+    async fn open_route_editor(&self, id: Option<i64>) {
+        let work = self.load_for_editor(id);
+        let result = match id {
+            Some(id) => self.while_busy(RouteBusy::Route(id), work).await,
+            None => work.await,
+        };
+        match result {
+            Ok(event) => self.shared.update(|st| st.editor = Some(event)),
+            Err(text) => self.report_route(Err(text)),
+        }
+    }
+
+    async fn load_for_editor(&self, id: Option<i64>) -> Result<EditorEvent, String> {
+        let (id, share, is_remote) = match id {
+            None => (None, editor_ui::new_route_share(), false),
+            Some(id) => {
+                let got = self
+                    .client
+                    .route(id)
+                    .await
+                    .map_err(|err| route_error_text(&err, false))?;
+                (Some(id), got.profile, got.route.remote)
+            }
+        };
+        let rule_sets = self.known_rule_sets().await;
+        Ok(EditorEvent::Opened {
+            id,
+            share,
+            is_remote,
+            rule_sets,
+        })
+    }
+
+    /// The rule-set names Throne knows, asked once per engine session. `None` when
+    /// Throne does not say: a stock engine has no such endpoint (404).
+    async fn known_rule_sets(&self) -> Option<Vec<String>> {
+        if let Some(known) = self.shared.read(|st| st.rule_sets.clone()) {
+            return known;
+        }
+        match self.client.rule_sets().await {
+            Ok(list) => {
+                let names = list.rule_sets;
+                self.shared
+                    .update(|st| st.rule_sets = Some(Some(names.clone())));
+                Some(names)
+            }
+            Err(Error::Api { status: 404, .. }) => {
+                self.shared.update(|st| st.rule_sets = Some(None));
+                None
+            }
+            Err(err) => {
+                debug!("rule sets are unknown for now: {err}");
+                None
+            }
+        }
+    }
+
+    /// Saves the editor's profile and reports the answer to the editor. Success
+    /// also shows «Сохранено» under the Routes screen.
+    async fn save_route(&self, id: Option<i64>, share: RouteShare, as_copy: bool) {
+        let result = match editor_ui::plan_save(id, share, as_copy) {
+            SavePlan::Update { id, share } => self
+                .client
+                .update_route_profile(id, &share)
+                .await
+                .map(|_| ())
+                .map_err(|err| editor_error_text(&err)),
+            SavePlan::Add { share } => match self.client.add_route_profile(&share).await {
+                Ok(added) => {
+                    self.shared.update(|st| st.add_routes(&added.routes));
+                    Ok(())
+                }
+                Err(err) => Err(editor_error_text(&err)),
+            },
+        };
+        match result {
+            Ok(()) => {
+                self.shared
+                    .update(|st| st.editor = Some(EditorEvent::Saved));
+                self.report_route(Ok(SAVED_TEXT.to_owned()));
+            }
+            Err(text) => {
+                warn!("saving the route failed: {text}");
+                self.shared
+                    .update(|st| st.editor = Some(EditorEvent::SaveFailed(text)));
+            }
         }
     }
 
@@ -671,6 +769,9 @@ async fn command_loop(
                 Command::Toggle | Command::Connect(_) | Command::Import(_) => {
                     flash_error(&engine.shared, ENGINE_NOT_READY_TEXT.to_owned());
                 }
+                Command::SaveRoute { .. } => engine.shared.update(|st| {
+                    st.editor = Some(EditorEvent::SaveFailed(ENGINE_NOT_READY_TEXT.to_owned()));
+                }),
                 _ => engine.report_route(Err(ENGINE_NOT_READY_TEXT.to_owned())),
             }
             continue;
@@ -805,6 +906,10 @@ struct State {
     routes: Vec<Route>,
     /// The Routes screen as last sent to the UI, to send it again only when it changes.
     routes_sent: Option<RoutesView>,
+    /// The editor event of the last command, sent once with the next frame.
+    editor: Option<EditorEvent>,
+    /// The rule-set names: `None` until asked, `Some(None)` when Throne does not say.
+    rule_sets: Option<Option<Vec<String>>>,
     route_busy: Option<RouteBusy>,
     route_note: RouteNote,
     route_seq: u64,
@@ -898,6 +1003,7 @@ impl State {
         let routes = self.routes_frame();
         let clear_import = std::mem::take(&mut self.clear_import);
         Frame {
+            editor: self.editor.take(),
             home,
             servers,
             routes,
@@ -1041,6 +1147,17 @@ pub fn route_error_text(err: &Error, endpoint_missing: bool) -> String {
             _ => error_text(err),
         },
         _ => error_text(err),
+    }
+}
+
+/// Russian text for a failed save. Throne's own message says what is wrong with
+/// the profile; the other errors read as for the Routes screen.
+pub fn editor_error_text(err: &Error) -> String {
+    match err {
+        Error::Api { code, message, .. } if code == "bad_request" && !message.trim().is_empty() => {
+            message.clone()
+        }
+        _ => route_error_text(err, false),
     }
 }
 

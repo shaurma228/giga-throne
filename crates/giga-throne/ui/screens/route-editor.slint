@@ -1,0 +1,1448 @@
+import { Theme } from "../theme.slint";
+import { GtInput } from "../components/text-input.slint";
+
+// Rows of the editor, built in Rust (src/editor_ui.rs).
+export struct ValueItem {
+    text: string,
+}
+
+export struct ChipItem {
+    index: int,
+    value: string,
+    kind: string,
+    tone: int,
+}
+
+export struct BucketItem {
+    index: int,
+    title: string,
+    count: int,
+    error: string,
+    items: [ChipItem],
+}
+
+export struct ReadyListItem {
+    name: string,
+}
+
+export struct RuleItem {
+    index: int,
+    n: int,
+    name: string,
+    summary: string,
+    action: string,
+    action-kind: string,
+    enabled: bool,
+    editable: bool,
+    selected: bool,
+}
+
+export struct CondItem {
+    kind: int,
+    label: string,
+    flag: bool,
+    on: bool,
+    suggest: bool,
+    values: [ValueItem],
+}
+
+export struct CondChoice {
+    kind: int,
+    label: string,
+}
+
+export struct ActionChoice {
+    kind: string,
+    label: string,
+    on: bool,
+    enabled: bool,
+}
+
+// The route editor's state and callbacks. Rust fills it and answers the callbacks
+// (src/editor_ui.rs). Names are committed by `flush()` before any action that
+// depends on them, because a typed name is not in the model until then.
+export global EditorState {
+    in-out property <string> route-name;
+    in-out property <bool> is-new;
+    in-out property <bool> remote;
+    in-out property <bool> advanced: false;
+    in-out property <bool> dirty;
+    in-out property <bool> can-save;
+    in-out property <string> save-hint;
+    in-out property <string> error-text;
+    in-out property <string> notice;
+    in-out property <bool> saving;
+    in-out property <bool> default-proxy;
+    in-out property <bool> default-direct;
+    in-out property <string> default-other;
+    in-out property <[BucketItem]> buckets;
+    in-out property <[ReadyListItem]> lists;
+    in-out property <[RuleItem]> rules;
+    in-out property <int> selected: -1;
+    in-out property <string> cur-name;
+    in-out property <bool> cur-editable;
+    in-out property <[ActionChoice]> cur-actions;
+    in-out property <[CondItem]> conds;
+    in-out property <[CondChoice]> cond-choices;
+    in-out property <[string]> suggestions;
+    in-out property <int> suggest-for: -1;
+    // The page the user asked for while the editor holds unsaved changes; -1 when none.
+    in-out property <int> leave-pending: -1;
+
+    callback set-name(string);
+    callback rename-rule(int, string);
+    callback set-default(string);
+    callback add-simple(int, string) -> bool;
+    callback remove-chip(int, int);
+    callback add-ready-list(string);
+    callback select-rule(int);
+    callback move-rule(bool);
+    callback toggle-rule(int);
+    callback set-action(string);
+    callback delete-rule();
+    callback add-rule();
+    callback add-condition(int);
+    callback remove-condition(int);
+    callback add-value(int, string) -> bool;
+    callback remove-value(int, string);
+    callback set-flag(int, bool);
+    callback suggest(int, string);
+    callback save();
+
+    public function flush() {
+        set-name(route-name);
+        if selected >= 0 {
+            rename-rule(selected, cur-name);
+        }
+    }
+}
+
+// Segmented choice: the chosen one is accent, the rest are text.
+component Seg inherits Rectangle {
+    in property <string> label;
+    in property <bool> chosen: false;
+    in property <bool> usable: true;
+    in property <length> font-size: 13px;
+
+    callback picked();
+
+    border-radius: 9px;
+    background: root.chosen ? Theme.accent : transparent;
+    opacity: root.usable ? 1 : 0.45;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: root.chosen ? Theme.on-accent : Theme.text-2;
+        font-family: Theme.font-body;
+        font-size: root.font-size;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.usable;
+        mouse-cursor: pointer;
+        clicked => {
+            root.picked();
+        }
+    }
+}
+
+// Solid button with a label. Primary is accent.
+component Btn inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+
+    callback clicked();
+
+    height: 32px;
+    width: label-text.preferred-width + 24px;
+    border-radius: 9px;
+    background: root.primary ? Theme.accent : Theme.raised;
+
+    label-text := Text {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.primary ? Theme.on-accent : Theme.text;
+        font-family: Theme.font-body;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Square icon button with a stroke icon (SVG path in a 24 unit box).
+component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <color> tint: Theme.text;
+    in property <bool> usable: true;
+
+    callback clicked();
+
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: Theme.raised;
+    opacity: root.usable ? 1 : 0.45;
+
+    Path {
+        width: 14px;
+        height: 14px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        stroke: root.tint;
+        stroke-width: 2.5px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+    }
+
+    TouchArea {
+        enabled: root.usable;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Kind of a rule's action, colored by its key from Rust.
+component Pill inherits Rectangle {
+    in property <string> kind;
+    in property <string> label;
+
+    height: 24px;
+    width: pill-text.preferred-width + 18px;
+    border-radius: 7px;
+    background: root.kind == "vpn" ? Theme.accent : root.kind == "block" ? Theme.ping-bad.with-alpha(0.14) : Theme.raised;
+
+    pill-text := Text {
+        x: 9px;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.kind == "vpn" ? Theme.on-accent : root.kind == "direct" ? Theme.proto-vless : root.kind == "block" ? Theme.ping-bad : root.kind == "dns" ? Theme.proto-ss : Theme.text-2;
+        font-family: Theme.font-body;
+        font-size: 11px;
+        font-weight: 800;
+    }
+}
+
+// On/off switch.
+component Toggle inherits Rectangle {
+    in property <bool> on;
+    in property <bool> usable: true;
+
+    callback picked();
+
+    width: 40px;
+    height: 24px;
+    border-radius: 12px;
+    background: root.on ? Theme.accent : Theme.line;
+    opacity: root.usable ? 1 : 0.45;
+
+    Rectangle {
+        x: root.on ? 19px : 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: root.on ? Theme.on-accent : Theme.muted;
+
+        animate x {
+            duration: Theme.anim-fast;
+        }
+    }
+
+    TouchArea {
+        enabled: root.usable;
+        mouse-cursor: pointer;
+        clicked => {
+            root.picked();
+        }
+    }
+}
+
+// A value of a bucket: the kind tag, the value and a remove mark.
+component Chip inherits Rectangle {
+    in property <string> kind;
+    in property <int> tone;
+    in property <string> value;
+
+    callback remove();
+
+    height: 30px;
+    width: min(row.preferred-width, 280px);
+    border-radius: 8px;
+    background: Theme.raised;
+
+    row := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 4px;
+        spacing: 6px;
+
+        Text {
+            text: root.kind;
+            color: root.tone == 0 ? Theme.proto-vless : root.tone == 1 ? Theme.proto-tuic : root.tone == 2 ? Theme.proto-trojan : Theme.proto-ss;
+            font-family: Theme.font-body;
+            font-size: 10px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.value;
+            color: Theme.text;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            accessible-role: button;
+            accessible-label: "Убрать " + root.value;
+
+            Path {
+                width: 12px;
+                height: 12px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 6 6 L 18 18 M 18 6 L 6 18";
+                stroke: Theme.muted;
+                stroke-width: 2.5px;
+                stroke-line-cap: round;
+                fill: transparent;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.remove();
+                }
+            }
+        }
+    }
+}
+
+// A value of a condition: monospace, with a remove mark when the condition can change.
+component ValueChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> usable: true;
+
+    callback removed();
+
+    height: 26px;
+    width: row.preferred-width;
+    border-radius: 6px;
+    background: Theme.raised;
+
+    row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: root.usable ? 2px : 8px;
+        spacing: 4px;
+
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-family: Theme.font-mono;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        if root.usable : Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
+
+            Path {
+                width: 9px;
+                height: 9px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 6 6 L 18 18 M 18 6 L 6 18";
+                stroke: Theme.muted;
+                stroke-width: 3px;
+                stroke-line-cap: round;
+                fill: transparent;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.removed();
+                }
+            }
+        }
+    }
+}
+
+// One bucket of the simple mode: a title, the input for a new value and its chips.
+// The input keeps its text when the value is refused; the error shows under the card.
+component BucketCard inherits Rectangle {
+    in property <BucketItem> item;
+    in property <color> tone-color;
+
+    callback add(string) -> bool;
+    callback remove-chip(int);
+
+    property <string> draft;
+
+    background: Theme.surface;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: Theme.raised;
+
+    function submit() {
+        if root.draft != "" && root.add(root.draft) {
+            root.draft = "";
+        }
+    }
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Rectangle {
+                width: 10px;
+                height: 18px;
+
+                Rectangle {
+                    width: 10px;
+                    height: 10px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 5px;
+                    background: root.tone-color;
+                }
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.item.title;
+                color: Theme.text;
+                font-family: Theme.font-body;
+                font-size: 15px;
+                font-weight: 800;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "\{root.item.count}";
+                color: Theme.muted;
+                font-family: Theme.font-mono;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            GtInput {
+                horizontal-stretch: 1;
+                height: 36px;
+                placeholder: "сайт, IP или программа";
+                text <=> root.draft;
+                accepted(text) => {
+                    root.submit();
+                }
+            }
+
+            IconButton {
+                icon: "M 12 5 L 12 19 M 5 12 L 19 12";
+                clicked => {
+                    root.submit();
+                }
+            }
+        }
+
+        if root.item.error != "" : Text {
+            text: root.item.error;
+            color: Theme.ping-bad;
+            font-family: Theme.font-body;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            interactive: true;
+            content-height: chips.preferred-height;
+
+            chips := FlexboxLayout {
+                width: parent.width;
+                spacing: 6px;
+
+                for chip in root.item.items : Chip {
+                    kind: chip.kind;
+                    tone: chip.tone;
+                    value: chip.value;
+                    remove => {
+                        root.remove-chip(chip.index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A rule of the advanced list: number, name and summary, the action, the switch.
+component RuleRow inherits Rectangle {
+    in property <RuleItem> item;
+
+    callback select();
+    callback toggle();
+
+    height: 56px;
+    border-radius: 12px;
+    border-width: 1.5px;
+    border-color: root.item.selected ? Theme.accent : Theme.raised;
+    background: root.item.selected ? Theme.connect-off : Theme.surface;
+    opacity: root.item.enabled ? 1 : 0.7;
+
+    // Behind the content: a click on the text selects the rule.
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => {
+            root.select();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        Text {
+            width: 22px;
+            text: "\{root.item.n}";
+            color: Theme.muted;
+            font-family: Theme.font-mono;
+            font-size: 12px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: root.item.name;
+                color: root.item.enabled ? Theme.text : Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 14px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.item.summary;
+                color: Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+
+        if !root.item.editable : Path {
+            width: 14px;
+            height: 14px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 6 11 L 18 11 L 18 20 L 6 20 Z M 8 11 L 8 7 L 16 7 L 16 11";
+            stroke: Theme.muted;
+            stroke-width: 2px;
+            stroke-line-join: round;
+            fill: transparent;
+        }
+
+        Pill {
+            kind: root.item.action-kind;
+            label: root.item.action;
+        }
+
+        Toggle {
+            on: root.item.enabled;
+            picked => {
+                root.toggle();
+            }
+        }
+    }
+}
+
+// A condition of the selected rule: its label, its values or its switch, and a
+// field for a new value. Rule-set names get suggestions while typed.
+component CondBox inherits Rectangle {
+    in property <CondItem> item;
+    in property <bool> editable;
+
+    callback remove();
+    callback add-value(string) -> bool;
+    callback remove-value(string);
+    callback set-flag(bool);
+
+    property <string> draft;
+
+    changed draft => {
+        if root.item.suggest {
+            EditorState.suggest(root.item.kind, root.draft);
+        }
+    }
+
+    function submit() {
+        if root.draft != "" && root.add-value(root.draft) {
+            root.draft = "";
+        }
+    }
+
+    height: layout.preferred-height;
+    background: Theme.bg;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.raised;
+
+    layout := VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.item.label;
+                color: Theme.text;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                font-weight: 600;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            if root.editable : IconButton {
+                width: 26px;
+                height: 26px;
+                icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                clicked => {
+                    root.remove();
+                }
+            }
+        }
+
+        if root.item.flag : HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.item.on ? "да" : "нет";
+                color: Theme.text-2;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+
+            Toggle {
+                on: root.item.on;
+                usable: root.editable;
+                picked => {
+                    root.set-flag(!root.item.on);
+                }
+            }
+        }
+
+        if !root.item.flag : FlexboxLayout {
+            spacing: 6px;
+
+            for value in root.item.values : ValueChip {
+                text: value.text;
+                usable: root.editable;
+                removed => {
+                    root.remove-value(value.text);
+                }
+            }
+        }
+
+        if !root.item.flag && root.editable : GtInput {
+            height: 32px;
+            placeholder: "значение";
+            text <=> root.draft;
+            accepted(text) => {
+                root.submit();
+            }
+        }
+
+        if !root.item.flag && root.editable && root.item.suggest && root.draft != "" && EditorState.suggest-for == root.item.kind : FlexboxLayout {
+            spacing: 6px;
+
+            for name in EditorState.suggestions : Rectangle {
+                height: 26px;
+                width: suggestion.preferred-width + 16px;
+                border-radius: 6px;
+                background: Theme.raised;
+                accessible-role: button;
+                accessible-label: name;
+
+                suggestion := Text {
+                    x: 8px;
+                    y: (parent.height - self.height) / 2;
+                    text: name;
+                    color: Theme.text-2;
+                    font-family: Theme.font-mono;
+                    font-size: 12px;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if root.add-value(name) {
+                            root.draft = "";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The right panel of the advanced mode: the selected rule.
+component Details inherits Rectangle {
+    width: 330px;
+    background: Theme.surface;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: Theme.raised;
+
+    // The delete button asks once: the second press within 3 s deletes.
+    property <bool> armed: false;
+
+    Timer {
+        interval: 3s;
+        running: root.armed;
+        triggered => {
+            root.armed = false;
+        }
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            GtInput {
+                horizontal-stretch: 1;
+                height: 36px;
+                placeholder: "Название правила";
+                text <=> EditorState.cur-name;
+                accepted(text) => {
+                    EditorState.flush();
+                }
+            }
+
+            IconButton {
+                icon: "M 6 15 L 12 9 L 18 15";
+                clicked => {
+                    EditorState.flush();
+                    EditorState.move-rule(true);
+                }
+            }
+
+            IconButton {
+                icon: "M 6 9 L 12 15 L 18 9";
+                clicked => {
+                    EditorState.flush();
+                    EditorState.move-rule(false);
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                width: root.armed ? 84px : 32px;
+                border-radius: 8px;
+                background: root.armed ? Theme.ping-bad.with-alpha(0.14) : Theme.raised;
+                accessible-role: button;
+                accessible-label: root.armed ? "Точно удалить правило" : "Удалить правило";
+
+                animate width {
+                    duration: Theme.anim-fast;
+                }
+
+                if !root.armed : Path {
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 4 7 L 20 7 M 9 7 L 9 4 L 15 4 L 15 7 M 6 7 L 7 20 L 17 20 L 18 7";
+                    stroke: Theme.muted;
+                    stroke-width: 2px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    fill: transparent;
+                }
+
+                if root.armed : Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Точно?";
+                    color: Theme.ping-bad;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if root.armed {
+                            root.armed = false;
+                            EditorState.flush();
+                            EditorState.delete-rule();
+                        } else {
+                            root.armed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: "ЕСЛИ";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            interactive: true;
+            content-height: conds.preferred-height;
+
+            conds := VerticalLayout {
+                width: parent.width;
+                spacing: 8px;
+
+                for cond in EditorState.conds : CondBox {
+                    item: cond;
+                    editable: EditorState.cur-editable;
+                    remove => {
+                        EditorState.remove-condition(cond.kind);
+                    }
+                    add-value(text) => {
+                        return EditorState.add-value(cond.kind, text);
+                    }
+                    remove-value(text) => {
+                        EditorState.remove-value(cond.kind, text);
+                    }
+                    set-flag(on) => {
+                        EditorState.set-flag(cond.kind, on);
+                    }
+                }
+
+                if EditorState.cur-editable : Rectangle {
+                    height: 34px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    accessible-role: button;
+                    accessible-label: "Добавить условие";
+
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "+ Условие";
+                        color: Theme.text-2;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            condition-list.show();
+                        }
+                    }
+
+                    condition-list := PopupWindow {
+                        x: 0px;
+                        y: parent.height + 4px;
+                        width: parent.width;
+                        height: EditorState.cond-choices.length * 34px + 12px;
+
+                        Rectangle {
+                            background: Theme.surface;
+                            border-radius: 12px;
+                            border-width: 1px;
+                            border-color: Theme.raised;
+
+                            VerticalLayout {
+                                padding: 6px;
+
+                                for choice in EditorState.cond-choices : Rectangle {
+                                    height: 34px;
+                                    border-radius: 8px;
+
+                                    Text {
+                                        x: 10px;
+                                        y: (parent.height - self.height) / 2;
+                                        text: choice.label;
+                                        color: Theme.text;
+                                        font-family: Theme.font-body;
+                                        font-size: 13px;
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            EditorState.add-condition(choice.kind);
+                                            condition-list.close();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !EditorState.cur-editable : Text {
+                    text: "Условия этого правила здесь не меняются";
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        Text {
+            text: "ТО";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        Rectangle {
+            height: 36px;
+            border-radius: 10px;
+            background: Theme.bg;
+
+            HorizontalLayout {
+                padding: 3px;
+                spacing: 3px;
+
+                for action in EditorState.cur-actions : Seg {
+                    horizontal-stretch: 1;
+                    label: action.label;
+                    chosen: action.on;
+                    usable: action.enabled;
+                    font-size: 12px;
+                    picked => {
+                        EditorState.set-action(action.kind);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// «Просто»: three buckets, the ready-made lists and the note about subdomains.
+component SimpleView inherits VerticalLayout {
+    spacing: 12px;
+
+    HorizontalLayout {
+        vertical-stretch: 1;
+        spacing: 12px;
+
+        for bucket in EditorState.buckets : BucketCard {
+            horizontal-stretch: 1;
+            item: bucket;
+            tone-color: bucket.index == 0 ? Theme.accent : bucket.index == 1 ? Theme.proto-vless : Theme.ping-bad;
+            add(text) => {
+                return EditorState.add-simple(bucket.index, text);
+            }
+            remove-chip(chip) => {
+                EditorState.remove-chip(bucket.index, chip);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Text {
+            text: "Готовые списки:";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        for list in EditorState.lists : Rectangle {
+            height: 30px;
+            width: list-text.preferred-width + 20px;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.line;
+            accessible-role: button;
+            accessible-label: "Добавить список " + list.name;
+
+            list-text := Text {
+                width: parent.width;
+                height: parent.height;
+                text: "+ " + list.name;
+                color: Theme.text;
+                font-family: Theme.font-body;
+                font-size: 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    EditorState.add-ready-list(list.name);
+                }
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: "Сайт включает все поддомены";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 12px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// «Продвинуто»: the ordered rules and the panel of the selected one.
+component AdvancedView inherits HorizontalLayout {
+    spacing: 14px;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 6px;
+
+        Text {
+            text: "Правила проверяются сверху вниз — срабатывает первое подходящее";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 12px;
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            interactive: true;
+            content-height: rules-col.preferred-height;
+
+            rules-col := VerticalLayout {
+                width: parent.width;
+                spacing: 6px;
+
+                for rule in EditorState.rules : RuleRow {
+                    item: rule;
+                    select => {
+                        EditorState.flush();
+                        EditorState.select-rule(rule.index);
+                    }
+                    toggle => {
+                        EditorState.toggle-rule(rule.index);
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 48px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 10px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Всё остальное";
+                    color: Theme.text-2;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+
+                Pill {
+                    kind: EditorState.default-proxy ? "vpn" : EditorState.default-other != "" ? "other" : "direct";
+                    label: EditorState.default-proxy ? "VPN" : EditorState.default-other != "" ? EditorState.default-other : "Напрямую";
+                }
+            }
+        }
+
+        Rectangle {
+            height: 40px;
+            border-radius: 12px;
+            border-width: 1.5px;
+            border-color: Theme.line;
+            accessible-role: button;
+            accessible-label: "Добавить правило";
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "+ Правило";
+                color: Theme.text;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    EditorState.flush();
+                    EditorState.add-rule();
+                }
+            }
+        }
+    }
+
+    if EditorState.selected >= 0 : Details {
+        vertical-stretch: 1;
+    }
+
+    if EditorState.selected < 0 : Rectangle {
+        width: 330px;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Theme.raised;
+
+        Text {
+            width: parent.width - 32px;
+            x: 16px;
+            y: 16px;
+            text: EditorState.rules.length == 0 ? "Правил пока нет. Добавь первое." : "Выбери правило, чтобы изменить его.";
+            color: Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// The route editor page: header, the default outbound, the mode and the footer line.
+export component RouteEditorScreen inherits Rectangle {
+    callback navigate(int);
+    callback leave-confirmed(int);
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding-top: 22px;
+        padding-bottom: 22px;
+        padding-left: 28px;
+        padding-right: 28px;
+        spacing: 16px;
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 10px;
+                background: Theme.raised;
+                accessible-role: button;
+                accessible-label: "Назад к маршрутам";
+
+                Path {
+                    width: 18px;
+                    height: 18px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 15 6 L 9 12 L 15 18";
+                    stroke: Theme.text;
+                    stroke-width: 2.5px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    fill: transparent;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        EditorState.flush();
+                        root.navigate(1);
+                    }
+                }
+            }
+
+            GtInput {
+                horizontal-stretch: 1;
+                flat: true;
+                height: 40px;
+                placeholder: "Название маршрута";
+                text-size: 22px;
+                text-font: Theme.font-display;
+                text-weight: 700;
+                text <=> EditorState.route-name;
+                accepted(text) => {
+                    EditorState.flush();
+                }
+            }
+
+            Rectangle {
+                width: 262px;
+                height: 40px;
+                border-radius: 12px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.raised;
+
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 4px;
+
+                    Seg {
+                        horizontal-stretch: 1;
+                        label: "Просто";
+                        chosen: !EditorState.advanced;
+                        picked => {
+                            EditorState.advanced = false;
+                        }
+                    }
+
+                    Seg {
+                        horizontal-stretch: 1;
+                        label: "Продвинуто";
+                        chosen: EditorState.advanced;
+                        picked => {
+                            EditorState.advanced = true;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 150px;
+                height: 40px;
+                border-radius: 12px;
+                background: EditorState.can-save ? Theme.accent : Theme.raised;
+                accessible-role: button;
+                accessible-label: "Сохранить";
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: EditorState.saving ? "Сохраняем…" : "Сохранить";
+                    color: EditorState.can-save ? Theme.on-accent : Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 14px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                // Clicks always commit the typed names and let Rust decide: a refused save shows its reason.
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        EditorState.flush();
+                        EditorState.save();
+                    }
+                }
+            }
+        }
+
+        if EditorState.leave-pending >= 0 : Rectangle {
+            height: 46px;
+            border-radius: 12px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.ping-bad;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Выйти без сохранения?";
+                    color: Theme.text;
+                    font-family: Theme.font-body;
+                    font-size: 14px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Btn {
+                    label: "Да";
+                    primary: true;
+                    clicked => {
+                        root.leave-confirmed(EditorState.leave-pending);
+                    }
+                }
+
+                Btn {
+                    label: "Остаться";
+                    clicked => {
+                        EditorState.leave-pending = -1;
+                    }
+                }
+            }
+        }
+
+        if EditorState.remote : Rectangle {
+            height: 44px;
+            border-radius: 12px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.raised;
+
+            Text {
+                width: parent.width - 28px;
+                height: parent.height;
+                x: 14px;
+                text: "Это маршрут по ссылке: он обновляется сам. Сохраним твою версию как копию.";
+                color: Theme.text-2;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        Rectangle {
+            height: 52px;
+            border-radius: 14px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.raised;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                spacing: 12px;
+
+                Text {
+                    text: "Всё остальное";
+                    color: Theme.text;
+                    font-family: Theme.font-body;
+                    font-size: 14px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "что не попало ни в одно правило";
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                if EditorState.default-other != "" : Pill {
+                    kind: "other";
+                    label: EditorState.default-other;
+                }
+
+                Rectangle {
+                    width: 236px;
+                    height: 34px;
+                    border-radius: 10px;
+                    background: Theme.bg;
+
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 3px;
+
+                        Seg {
+                            horizontal-stretch: 1;
+                            label: "Через VPN";
+                            chosen: EditorState.default-proxy;
+                            font-size: 12px;
+                            picked => {
+                                EditorState.set-default("proxy");
+                            }
+                        }
+
+                        Seg {
+                            horizontal-stretch: 1;
+                            label: "Напрямую";
+                            chosen: EditorState.default-direct;
+                            font-size: 12px;
+                            picked => {
+                                EditorState.set-default("direct");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !EditorState.advanced : SimpleView {
+            vertical-stretch: 1;
+        }
+
+        if EditorState.advanced : AdvancedView {
+            vertical-stretch: 1;
+        }
+
+        // The error of the last save, else the last action's error, else the first problem of the profile.
+        Text {
+            text: EditorState.error-text != "" ? EditorState.error-text : EditorState.notice != "" ? EditorState.notice : EditorState.save-hint;
+            color: EditorState.error-text != "" || EditorState.notice != "" ? Theme.ping-bad : Theme.muted;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+    }
+}

@@ -534,6 +534,7 @@ mod e2e {
     use tokio::time::timeout;
 
     use crate::engine::{Command, Engine};
+    use crate::route_editor::{Bucket, EditorModel};
     use crate::sidecar::{Sidecar, SidecarConfig, SidecarHandle, SidecarState};
     use crate::sysproxy::runner::FakeRunner;
     use crate::sysproxy::SystemProxy;
@@ -994,6 +995,96 @@ mod e2e {
                 .filter(|route| preset_of(route).map(|p| p.id) == Some("ru-blocked"))
                 .count();
             assert_eq!(with_url, 1, "the list was added twice: {routes:?}");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the real Throne binary in sidecar/Throne and network access to GitHub"]
+    async fn editor_save_real_throne() {
+        with_throne(|throne| async move {
+            let client = Arc::clone(&throne.client);
+            let sysproxy = SystemProxy::with_runner(&throne.data, Arc::new(FakeRunner::new()));
+            let engine = Engine::new(
+                Arc::clone(&client),
+                throne.port,
+                Box::new(|_| {}),
+                Arc::new(sysproxy),
+                throne.data.join("prefs.json"),
+            );
+
+            // A local profile: the editor adds a site to «Через VPN» and a program to
+            // «Напрямую», and the save writes them as Throne's simple rules right after
+            // the two infrastructure rules.
+            let added = client
+                .add_route_link(BYPASS_RUSSIA_LINK)
+                .await
+                .expect("POST /v1/routes with the Bypass Russia link");
+            let id = route_named(&added.routes, "Bypass Russia").id;
+            let before = client.route(id).await.expect("GET /v1/routes/{id}");
+            let mut model = EditorModel::from_share(&before.profile, before.route.remote);
+            model
+                .add_simple(Bucket::Proxy, "youtube.com")
+                .expect("youtube.com is a site");
+            model
+                .add_simple(Bucket::Direct, "steam")
+                .expect("steam is a program");
+            engine
+                .handle(Command::SaveRoute {
+                    id: Some(id),
+                    share: model.to_share(),
+                    as_copy: model.is_remote(),
+                })
+                .await;
+
+            let saved = client.route(id).await.expect("GET after the save");
+            let rules = &saved.profile.rules;
+            assert_eq!(rules[0], before.profile.rules[0], "DNS rule moved");
+            assert_eq!(rules[1], before.profile.rules[1], "private IP rule moved");
+            assert_eq!(rules[2].r#type, "simple_process_name_bypass", "{rules:?}");
+            assert_eq!(rules[2].process_name, Some(vec!["steam".to_owned()]));
+            assert_eq!(rules[3].r#type, "simple_address_proxy", "{rules:?}");
+            assert_eq!(rules[3].domain_suffix, Some(vec!["youtube.com".to_owned()]));
+            assert_eq!(&rules[4..], &before.profile.rules[2..], "other rules kept");
+            assert_eq!(saved.route.rule_count, rules.len() as u64);
+
+            // A remote profile is never replaced: the edited version becomes a copy.
+            let link = preset_link(find("ru-blocked").expect("preset")).expect("link");
+            let remote = client
+                .add_remote_routes(&link, true)
+                .await
+                .expect("POST /v1/routes with the remote list");
+            let remote_id = route_named(&remote.routes, "Proxy Russia Blocked").id;
+            let before = client.route(remote_id).await.expect("GET remote route");
+            assert!(before.route.remote, "{:?}", before.route);
+            let mut model = EditorModel::from_share(&before.profile, before.route.remote);
+            model
+                .add_simple(Bucket::Block, "doubleclick.net")
+                .expect("doubleclick.net is a site");
+            assert!(model.is_remote() && model.is_dirty());
+            engine
+                .handle(Command::SaveRoute {
+                    id: Some(remote_id),
+                    share: model.to_share(),
+                    as_copy: model.is_remote(),
+                })
+                .await;
+
+            let routes = routes_of(&client).await;
+            let copy = route_named(&routes, "Proxy Russia Blocked (копия)");
+            assert!(!copy.remote, "{copy:?}");
+            let copy = client.route(copy.id).await.expect("GET the copy");
+            assert!(
+                copy.profile.rules.iter().any(|rule| {
+                    rule.r#type == "simple_address_block"
+                        && rule.domain_suffix == Some(vec!["doubleclick.net".to_owned()])
+                }),
+                "{:?}",
+                copy.profile.rules
+            );
+            let after = client.route(remote_id).await.expect("GET the remote route");
+            assert!(after.route.remote, "{:?}", after.route);
+            assert_eq!(after.profile, before.profile, "the remote profile changed");
         })
         .await;
     }

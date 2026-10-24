@@ -3,8 +3,15 @@ import { NavRail } from "components/nav-rail.slint";
 import { ServerList, ServerItem } from "components/server-list.slint";
 import { HomeScreen } from "screens/home.slint";
 import { RoutesScreen, PresetItem, RouteItem } from "screens/routes.slint";
+import {
+    RouteEditorScreen, EditorState, BucketItem, ChipItem, ReadyListItem, RuleItem, CondItem,
+    ValueItem, CondChoice, ActionChoice,
+} from "screens/route-editor.slint";
 
-export { Theme, ServerItem, PresetItem, RouteItem }
+export {
+    Theme, ServerItem, PresetItem, RouteItem, EditorState, BucketItem, ChipItem, ReadyListItem,
+    RuleItem, CondItem, ValueItem, CondChoice, ActionChoice,
+}
 
 export component AppWindow inherits Window {
     title: "giga-throne";
@@ -17,7 +24,7 @@ export component AppWindow inherits Window {
 
     in property <string> engine-status: "Движок запускается…";
 
-    // Page shown: 0 Home (with the server list), 1 Routes. Set by the nav rail.
+    // Page shown: 0 Home (with the server list), 1 Routes, 2 the route editor (opened from Routes).
     in-out property <int> page: 0;
 
     // Home screen state, set from Rust (src/view.rs).
@@ -64,9 +71,24 @@ export component AppWindow inherits Window {
     callback create-route();
     callback edit-route(int);
 
+    // Every page change goes through here: the editor asks before it is left unsaved.
+    function navigate(to: int) {
+        if root.page == 2 && to != 2 {
+            EditorState.flush();
+            if EditorState.dirty {
+                EditorState.leave-pending = to;
+                return;
+            }
+        }
+        root.page = to;
+    }
+
     HorizontalLayout {
         NavRail {
-            active <=> root.page;
+            active: root.page == 2 ? 1 : root.page;
+            navigate(to) => {
+                root.navigate(to);
+            }
         }
 
         if root.page == 0 : HomeScreen {
@@ -135,6 +157,17 @@ export component AppWindow inherits Window {
             }
             edit-route(id) => {
                 root.edit-route(id);
+            }
+        }
+
+        if root.page == 2 : RouteEditorScreen {
+            horizontal-stretch: 1;
+            navigate(to) => {
+                root.navigate(to);
+            }
+            leave-confirmed(to) => {
+                EditorState.leave-pending = -1;
+                root.page = to;
             }
         }
     }

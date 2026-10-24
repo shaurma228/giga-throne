@@ -9,6 +9,7 @@ use std::time::Duration;
 use slint::{ModelRc, VecModel};
 use throne_api::types::{ConnectionState, LiveStatsResponse, Profile, Route, Status};
 
+use crate::editor_ui::{self, EditorEvent};
 use crate::presets::{self, Preset};
 use crate::{AppWindow, PresetItem, RouteItem, ServerItem};
 
@@ -111,6 +112,8 @@ pub struct RoutesView {
 /// Everything the UI thread needs to draw one update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
+    /// What the route editor has to do, once, after the command that made it.
+    pub editor: Option<EditorEvent>,
     pub home: HomeView,
     /// The whole server list, present only when the profiles changed.
     pub servers: Option<Vec<ServerRow>>,
@@ -458,6 +461,9 @@ fn apply(window: &AppWindow, frame: Frame) {
     }
     if let Some(routes) = frame.routes {
         apply_routes(window, routes);
+    }
+    if let Some(event) = frame.editor {
+        editor_ui::on_event(event);
     }
 }
 
