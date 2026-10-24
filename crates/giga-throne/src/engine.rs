@@ -377,7 +377,14 @@ impl Engine {
         let Some(preset) = presets::find(id) else {
             return Err("Неизвестный режим".to_owned());
         };
-        let routes = self.shared.read(|st| st.routes.clone());
+        // The poll loop refreshes the list only now and then: plan from a fresh one,
+        // or a quick second click would add the same list again.
+        let routes = self
+            .client
+            .routes()
+            .await
+            .map_err(|err| route_error_text(&err, true))?;
+        self.shared.update(|st| st.routes = routes.clone());
         match presets::plan_preset(&routes, preset) {
             PresetPlan::Activate(route_id) => self.activate_route(route_id).await,
             PresetPlan::AddThenActivate(url) => {
@@ -388,6 +395,7 @@ impl Engine {
                     .add_remote_routes(&link, true)
                     .await
                     .map_err(|err| route_error_text(&err, true))?;
+                self.shared.update(|st| st.add_routes(&added.routes));
                 let route_id = presets::pick_added_route(&added, &url)?;
                 self.activate_route(route_id).await
             }
@@ -814,6 +822,17 @@ struct State {
 }
 
 impl State {
+    /// Puts freshly added routes into the list now, without waiting for the poll.
+    /// A route already listed by id is replaced.
+    fn add_routes(&mut self, added: &[Route]) {
+        for route in added {
+            match self.routes.iter_mut().find(|known| known.id == route.id) {
+                Some(known) => *known = route.clone(),
+                None => self.routes.push(route.clone()),
+            }
+        }
+    }
+
     fn set_status(&mut self, status: Status) {
         let profile_id = status.profile.as_ref().map_or(-1, |p| p.id);
         self.running_since = match status.state {

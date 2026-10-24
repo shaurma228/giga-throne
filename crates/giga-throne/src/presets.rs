@@ -984,6 +984,16 @@ mod e2e {
             assert!(added.remote && added.rule_count > 0, "{added:?}");
             assert_eq!(added.name, "Proxy Russia Blocked");
 
+            // A second click, with no poll in between, must not add the list again.
+            engine
+                .handle(Command::SelectPreset("ru-blocked".to_owned()))
+                .await;
+            let routes = routes_of(&client).await;
+            let with_url = routes
+                .iter()
+                .filter(|route| preset_of(route).map(|p| p.id) == Some("ru-blocked"))
+                .count();
+            assert_eq!(with_url, 1, "the list was added twice: {routes:?}");
         })
         .await;
     }
