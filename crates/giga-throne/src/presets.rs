@@ -486,3 +486,477 @@ mod tests {
         assert_eq!(classify_import("ftp://example.com"), ImportKind::Invalid);
     }
 }
+
+#[cfg(test)]
+mod e2e {
+    //! Tests against the real Throne from `sidecar/`, one Throne per test.
+    //!
+    //! Run with `cargo test -p giga-throne e2e -- --ignored --nocapture`. The
+    //! remote tests need network access to raw.githubusercontent.com.
+
+    use std::future::Future;
+    use std::net::{TcpListener, TcpStream};
+    use std::panic::resume_unwind;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+    use throne_api::types::{Route, RouteRule, RouteShare, Status, UpdateRouteRequest};
+    use throne_api::{decode_route_link, Client, Error, Method};
+    use tokio::sync::watch;
+    use tokio::time::timeout;
+
+    use crate::engine::{Command, Engine};
+    use crate::sidecar::{Sidecar, SidecarConfig, SidecarHandle, SidecarState};
+    use crate::sysproxy::runner::FakeRunner;
+    use crate::sysproxy::SystemProxy;
+
+    use super::*;
+
+    /// Time allowed for Throne to answer the API after the start.
+    const READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// Hard limit of one test, start and shutdown included.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(90);
+
+    /// Bypass Russia, from a real `throne://route/` link.
+    const BYPASS_RUSSIA_LINK: &str = "throne://route/eyJkZWZhdWx0X291dGJvdW5kIjoicHJveHkiLCJraW5kIjoidGhyb25lLXJvdXRlLXByb2ZpbGUiLCJuYW1lIjoiQnlwYXNzIFJ1c3NpYSIsInJ1bGVzIjpbeyJhY3Rpb24iOiJoaWphY2stZG5zIiwibmFtZSI6ImltcG9ydGVkIHJ1bGUgIzEiLCJwcm90b2NvbCI6ImRucyIsInR5cGUiOiJjdXN0b20ifSx7ImFjdGlvbiI6InJvdXRlIiwiaXBfaXNfcHJpdmF0ZSI6dHJ1ZSwibmFtZSI6ImltcG9ydGVkIHJ1bGUgIzIiLCJvdXRib3VuZCI6ImRpcmVjdCIsInR5cGUiOiJjdXN0b20ifSx7ImFjdGlvbiI6InJvdXRlIiwibmFtZSI6ImltcG9ydGVkIHJ1bGUgIzMiLCJvdXRib3VuZCI6ImRpcmVjdCIsInJ1bGVfc2V0IjpbImdlb2lwLXJ1IiwiZ2Vvc2l0ZS1ydSIsImdlb3NpdGUtY2F0ZWdvcnktcnUiLCJnZW9zaXRlLXJ1LWF2YWlsYWJsZS1vbmx5LWluc2lkZSJdLCJ0eXBlIjoiY3VzdG9tIn1dLCJ2IjoxfQ";
+    /// Four Russia lists, from a real `throne://remoteroute/` link.
+    const REMOTE_ROUTES_LINK: &str = "throne://remoteroute/aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3Rocm9uZXByb2ovcm91dGVwcm9maWxlcy9wcm9maWxlL0J5cGFzc19SdXNzaWEjQnlwYXNzIFJ1c3NpYQpodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vdGhyb25lcHJvai9yb3V0ZXByb2ZpbGVzL3Byb2ZpbGUvUHJveHlfUnVzc2lhX0Jsb2NrZWQjUHJveHkgUnVzc2lhIEJsb2NrZWQKaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3Rocm9uZXByb2ovcm91dGVwcm9maWxlcy9wcm9maWxlL1Byb3h5X0FudGl6YXByZXQjUHJveHkgQW50aXphcHJldApodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vdGhyb25lcHJvai9yb3V0ZXByb2ZpbGVzL3Byb2ZpbGUvUHJveHlfUmVmaWx0ZXIjUHJveHkgUmVmaWx0ZXI";
+
+    /// What a test body gets: the API client, our API port and the data root.
+    struct Throne {
+        client: Arc<Client>,
+        port: u16,
+        data: PathBuf,
+    }
+
+    /// Picks a port that is free right now.
+    fn free_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.local_addr().expect("local addr").port()
+    }
+
+    /// Starts a fresh Throne, runs `body` against it and shuts Throne down.
+    ///
+    /// The body runs in its own task. A panic in it, or a timeout, still
+    /// reaches the shutdown before the panic is re-raised.
+    async fn with_throne<F, Fut>(body: F)
+    where
+        F: FnOnce(Throne) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let binary = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../sidecar/Throne/Throne"
+        ));
+        assert!(binary.is_file(), "missing {}", binary.display());
+        let dir = tempfile::tempdir().expect("temp dir");
+        let port = free_port();
+        let config = SidecarConfig {
+            binary,
+            data_root: dir.path().to_path_buf(),
+            port,
+        };
+
+        let handle: SidecarHandle = Sidecar::start(config).await.expect("start sidecar");
+        let mut state = handle.state();
+        let throne = Throne {
+            client: handle.client(),
+            port,
+            data: dir.path().to_path_buf(),
+        };
+        let client = Arc::clone(&throne.client);
+        let mut task = tokio::spawn(async move {
+            wait_ready(&mut state).await;
+            move_ports(&client).await;
+            body(throne).await;
+        });
+
+        let finished = timeout(TEST_TIMEOUT, &mut task).await;
+        if finished.is_err() {
+            task.abort();
+        }
+        handle.shutdown().await;
+        let mut state = handle.state();
+        let stopped = state
+            .wait_for(|s| *s == SidecarState::Stopped)
+            .await
+            .expect("state channel open")
+            .clone();
+        assert_eq!(stopped, SidecarState::Stopped);
+
+        match finished {
+            Err(_) => panic!("the test did not finish within {TEST_TIMEOUT:?}"),
+            Ok(Err(join)) if join.is_panic() => resume_unwind(join.into_panic()),
+            Ok(Err(join)) => panic!("the test task was cancelled: {join}"),
+            Ok(Ok(())) => {}
+        }
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "Throne still listens after shutdown"
+        );
+    }
+
+    /// Waits until Throne answers the API, or fails the test with a clear message.
+    async fn wait_ready(state: &mut watch::Receiver<SidecarState>) {
+        let ready = timeout(
+            READY_TIMEOUT,
+            state.wait_for(|s| !matches!(s, SidecarState::Starting)),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("Throne did not become ready within {READY_TIMEOUT:?}"))
+        .expect("state channel open")
+        .clone();
+        match ready {
+            SidecarState::Ready { version } => println!("Throne {version} is ready"),
+            other => panic!("expected Ready, got {other:?}"),
+        }
+    }
+
+    /// Gives this Throne its own inbound, DNS and Clash API ports. Tests run in
+    /// parallel, and the default inbound port 2080 is often taken by another
+    /// Throne, which makes the remote list fetches fail.
+    async fn move_ports(client: &Client) {
+        let ports = json!({
+            "inbound_port": free_port(),
+            "dns_in_port": free_port(),
+            "clash_api_port": free_port(),
+        });
+        client
+            .request(
+                Method::Put,
+                "/v1/settings",
+                None,
+                Some(json!({ "settings": ports })),
+            )
+            .await
+            .expect("PUT /v1/settings with free ports");
+    }
+
+    /// The error code of an API error, or a panic for any other error.
+    fn api_code(err: Error) -> String {
+        match err {
+            Error::Api { code, .. } => code,
+            other => panic!("expected an API error, got {other:?}"),
+        }
+    }
+
+    fn route_named<'a>(routes: &'a [Route], name: &str) -> &'a Route {
+        routes
+            .iter()
+            .find(|route| route.name == name)
+            .unwrap_or_else(|| panic!("no route named {name:?} in {routes:?}"))
+    }
+
+    /// The rule-set lists of the rules of a share, in rule order.
+    fn rule_sets_of(share: &RouteShare) -> Vec<Option<Vec<String>>> {
+        share
+            .rules
+            .iter()
+            .map(|rule| rule.rule_set.clone())
+            .collect()
+    }
+
+    /// A custom rule that sends `example.com` through the proxy.
+    fn custom_rule() -> RouteRule {
+        serde_json::from_value(json!({
+            "name": "Example",
+            "type": "custom",
+            "action": "route",
+            "outbound": "proxy",
+            "domain_suffix": ["example.com"]
+        }))
+        .expect("rule parses")
+    }
+
+    /// The names of the routes, in list order.
+    fn route_list_names(routes: &[Route]) -> Vec<&str> {
+        routes.iter().map(|route| route.name.as_str()).collect()
+    }
+
+    /// Lists the routes, failing the test on error.
+    async fn routes_of(client: &Client) -> Vec<Route> {
+        client.routes().await.expect("GET /v1/routes")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the real Throne binary in sidecar/Throne"]
+    async fn routes_api_real_throne() {
+        with_throne(|throne| async move {
+            let client = throne.client;
+
+            // Listing: Default is there, and every route carries the new fields.
+            let raw: Value = client
+                .request_json(Method::Get, "/v1/routes", None, None)
+                .await
+                .expect("GET /v1/routes as JSON");
+            for route in raw["routes"].as_array().expect("routes array") {
+                for key in [
+                    "remote",
+                    "remote_url",
+                    "auto_update",
+                    "updated_at",
+                    "raw",
+                    "rule_count",
+                ] {
+                    assert!(route.get(key).is_some(), "{key} missing in {route}");
+                }
+            }
+            let routes = routes_of(&client).await;
+            println!("routes: {:?}", route_list_names(&routes));
+            let default = route_named(&routes, "Default").clone();
+
+            // Rule sets: sorted, and the Russia list is among them.
+            let sets = client
+                .rule_sets()
+                .await
+                .expect("GET /v1/rule-sets")
+                .rule_sets;
+            println!("rule sets: {} names", sets.len());
+            assert!(!sets.is_empty(), "no rule sets");
+            assert!(
+                sets.windows(2).all(|pair| pair[0] <= pair[1]),
+                "rule sets are not sorted"
+            );
+            assert!(
+                sets.iter().any(|set| set == "geosite-ru-blocked"),
+                "{sets:?}"
+            );
+
+            // Adding a link: three rules, the same rule sets as the link.
+            let added = client
+                .add_route_link(BYPASS_RUSSIA_LINK)
+                .await
+                .expect("POST /v1/routes with the Bypass Russia link");
+            let id = route_named(&added.routes, "Bypass Russia").id;
+            let got = client.route(id).await.expect("GET /v1/routes/{id}");
+            let fixture = decode_route_link(BYPASS_RUSSIA_LINK).expect("fixture link decodes");
+            assert_eq!(got.route.id, id);
+            assert_eq!(got.profile.rules.len(), 3, "{:?}", got.profile);
+            assert_eq!(rule_sets_of(&got.profile), rule_sets_of(&fixture));
+            assert_eq!(got.route.rule_count, 3);
+
+            // A rule with a domain suffix is added and comes back exactly.
+            let mut share = got.profile.clone();
+            share.rules.push(custom_rule());
+            let updated = client
+                .update_route_profile(id, &share)
+                .await
+                .expect("PUT /v1/routes/{id} with four rules");
+            assert_eq!(updated.route.id, id);
+            let after = client.route(id).await.expect("GET /v1/routes/{id}");
+            assert_eq!(after.profile.rules.len(), 4, "{:?}", after.profile);
+            assert_eq!(after.profile.rules[3], custom_rule());
+            assert_eq!(&after.profile.rules[..3], &got.profile.rules[..]);
+            assert_eq!(after.route.rule_count, 4);
+
+            // Rename.
+            let renamed = client.rename_route(id, "Bypass RU").await.expect("rename");
+            assert_eq!(renamed.route.name, "Bypass RU");
+            assert_eq!(after.profile.name, "Bypass Russia");
+
+            // Activation, then the guard against deleting the active route.
+            let status: Status = client.set_active_route(id).await.expect("activate");
+            assert_eq!(status.route.as_ref().map(|route| route.id), Some(id));
+            let err = client
+                .delete_route(id)
+                .await
+                .expect_err("active route is kept");
+            assert_eq!(api_code(err), "route_active");
+
+            // Activating Default lets the route go.
+            let status = client
+                .set_active_route(default.id)
+                .await
+                .expect("activate Default");
+            assert_eq!(
+                status.route.as_ref().map(|route| route.id),
+                Some(default.id)
+            );
+            client
+                .delete_route(id)
+                .await
+                .expect("inactive route deleted");
+            let err = client.route(id).await.expect_err("deleted route is gone");
+            assert_eq!(api_code(err), "not_found");
+            let routes = routes_of(&client).await;
+            let names = route_list_names(&routes);
+            assert!(!names.contains(&"Bypass RU"), "{names:?}");
+
+            // Default is the last route left and it is the active one. Throne checks
+            // the active route first, so the answer is route_active, not last_route.
+            let err = client
+                .delete_route(default.id)
+                .await
+                .expect_err("the last route is kept");
+            assert_eq!(api_code(err), "route_active");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the real Throne binary in sidecar/Throne and network access to GitHub"]
+    async fn remote_presets_real_throne() {
+        with_throne(|throne| async move {
+            let client = throne.client;
+
+            // Four Russia lists, fetched once each.
+            let added = client
+                .add_remote_routes(REMOTE_ROUTES_LINK, true)
+                .await
+                .expect("POST /v1/routes with the remoteroute link");
+            println!("results: {:?}", added.results);
+            assert_eq!(added.routes.len(), 4, "{:?}", added.routes);
+            if added.results.len() != 4 || added.results.iter().any(|result| !result.ok) {
+                panic!(
+                    "the list fetch from GitHub failed or did not finish; is \
+                     raw.githubusercontent.com reachable? results: {:?}, warnings: {:?}",
+                    added.results, added.warnings
+                );
+            }
+
+            let routes = routes_of(&client).await;
+            println!("routes: {:?}", route_list_names(&routes));
+            for route in &routes {
+                if route.name == "Default" {
+                    continue;
+                }
+                assert!(route.remote, "{route:?}");
+                assert!(route.auto_update, "{route:?}");
+                assert!(route.remote_url.starts_with(LIST_URL_PREFIX), "{route:?}");
+                assert!(route.rule_count > 0, "{route:?}");
+                let fetched = client.route(route.id).await.expect("GET /v1/routes/{id}");
+                assert!(!fetched.profile.rules.is_empty(), "{route:?}");
+                println!("{}: {} rules", route.name, fetched.profile.rules.len());
+            }
+            for name in [
+                "Proxy Russia Blocked",
+                "Proxy Antizapret",
+                "Proxy Refilter",
+                "Bypass Russia",
+            ] {
+                assert!(route_named(&routes, name).remote, "{name}");
+            }
+
+            // Refresh: the timestamp does not go back.
+            let blocked = route_named(&routes, "Proxy Russia Blocked").clone();
+            let refreshed = client
+                .refresh_route(blocked.id)
+                .await
+                .expect("POST /v1/routes/{id}/update");
+            println!("refresh: {refreshed:?}");
+            assert!(refreshed.ok, "{refreshed:?}");
+            let now = route_named(&routes_of(&client).await, "Proxy Russia Blocked").updated_at;
+            assert!(
+                now >= blocked.updated_at,
+                "updated_at went back: {now} < {}",
+                blocked.updated_at
+            );
+            assert!(refreshed.updated_at.unwrap_or(0) >= blocked.updated_at);
+
+            // A remote profile takes no profile edit.
+            let share = client
+                .route(blocked.id)
+                .await
+                .expect("GET /v1/routes/{id}")
+                .profile;
+            let err = client
+                .update_route_profile(blocked.id, &share)
+                .await
+                .expect_err("remote profile refuses a profile edit");
+            assert_eq!(api_code(err), "remote_route");
+
+            // The planner finds the list we just added.
+            let preset = find("ru-blocked").expect("preset exists");
+            assert_eq!(
+                plan_preset(&routes, preset),
+                PresetPlan::Activate(blocked.id)
+            );
+
+            // Activation.
+            let status: Status = client
+                .set_active_route(blocked.id)
+                .await
+                .expect("activate Proxy Russia Blocked");
+            assert_eq!(
+                status.route.as_ref().map(|route| route.id),
+                Some(blocked.id)
+            );
+            assert!(
+                status.profile.is_none(),
+                "a profile runs: {:?}",
+                status.profile
+            );
+
+            // Turning the active remote profile into a local copy.
+            let mut local = client
+                .route(blocked.id)
+                .await
+                .expect("GET /v1/routes/{id}")
+                .profile;
+            local.rules.push(custom_rule());
+            let turned = client
+                .update_route(
+                    blocked.id,
+                    &UpdateRouteRequest {
+                        profile: Some(local.clone()),
+                        remote: Some(false),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("PUT with remote false and a profile");
+            println!("local copy: {:?}", turned.route);
+            assert!(!turned.route.remote, "{:?}", turned.route);
+            assert_eq!(turned.route.remote_url, "");
+            assert_eq!(turned.route.rule_count, local.rules.len() as u64);
+            let again = client.route(blocked.id).await.expect("GET /v1/routes/{id}");
+            assert!(!again.route.remote, "{:?}", again.route);
+            assert_eq!(again.profile.rules.len(), local.rules.len());
+            assert_eq!(again.profile.rules.last(), Some(&custom_rule()));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the real Throne binary in sidecar/Throne and network access to GitHub"]
+    async fn engine_select_preset_real_throne() {
+        with_throne(|throne| async move {
+            let client = Arc::clone(&throne.client);
+            let sysproxy = SystemProxy::with_runner(&throne.data, Arc::new(FakeRunner::new()));
+            let engine = Engine::new(
+                Arc::clone(&client),
+                throne.port,
+                Box::new(|_| {}),
+                Arc::new(sysproxy),
+                throne.data.join("prefs.json"),
+            );
+
+            // A fresh Throne: only Default exists, so the preset adds its list.
+            assert_eq!(route_list_names(&routes_of(&client).await), ["Default"]);
+            engine
+                .handle(Command::SelectPreset("ru-blocked".to_owned()))
+                .await;
+
+            let routes = routes_of(&client).await;
+            println!("routes after the preset: {:?}", route_list_names(&routes));
+            let added = routes
+                .iter()
+                .find(|route| preset_of(route).map(|p| p.id) == Some("ru-blocked"))
+                .unwrap_or_else(|| panic!("the preset's route was not added: {routes:?}"));
+            let status: Status = client
+                .request_json(Method::Get, "/v1/status", None, None)
+                .await
+                .expect("GET /v1/status");
+            assert_eq!(
+                status.route.as_ref().map(|route| route.id),
+                Some(added.id),
+                "the preset's route is not active: {status:?}"
+            );
+            assert!(added.remote && added.rule_count > 0, "{added:?}");
+        })
+        .await;
+    }
+}
