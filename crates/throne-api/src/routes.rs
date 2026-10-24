@@ -238,6 +238,19 @@ pub fn decode_remote_route_link(link: &str) -> Result<Vec<(String, String)>> {
     Ok(entries)
 }
 
+/// Encodes `(URL, name)` pairs as a `throne://remoteroute/<base64url>` link (no
+/// padding), one `URL#name` per line: the form [`decode_remote_route_link`] reads.
+pub fn encode_remote_route_link(entries: &[(String, String)]) -> String {
+    let text: Vec<String> = entries
+        .iter()
+        .map(|(url, name)| format!("{url}#{name}"))
+        .collect();
+    format!(
+        "{REMOTE_ROUTE_LINK_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(text.join("\n"))
+    )
+}
+
 /// Strips `prefix` and surrounding whitespace, and returns the payload after it.
 fn strip_prefix<'a>(link: &'a str, prefix: &str) -> Result<&'a str> {
     link.trim()
@@ -254,4 +267,40 @@ fn decode_payload(payload: &str) -> Result<Vec<u8>> {
 
 fn invalid_link(reason: impl std::fmt::Display) -> Error {
     Error::Protocol(format!("invalid route link: {reason}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pairs(entries: &[(&str, &str)]) -> Vec<(String, String)> {
+        entries
+            .iter()
+            .map(|(url, name)| ((*url).to_owned(), (*name).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn remote_link_round_trips_with_spaces_in_names() {
+        let entries = pairs(&[
+            (
+                "https://example.com/Proxy_Russia_Blocked",
+                "Proxy Russia Blocked",
+            ),
+            ("https://example.com/Bypass_Russia", "Bypass Russia"),
+        ]);
+        let link = encode_remote_route_link(&entries);
+        assert!(link.starts_with("throne://remoteroute/"), "{link}");
+        assert!(!link.ends_with('='), "no padding: {link}");
+        assert_eq!(decode_remote_route_link(&link).expect("decode"), entries);
+    }
+
+    #[test]
+    fn single_entry_is_one_line_without_newline() {
+        let link = encode_remote_route_link(&pairs(&[("https://e.com/A", "Name")]));
+        let text = URL_SAFE_NO_PAD
+            .decode(link.trim_start_matches("throne://remoteroute/"))
+            .expect("base64url");
+        assert_eq!(text, b"https://e.com/A#Name");
+    }
 }
