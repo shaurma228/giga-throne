@@ -4,6 +4,7 @@ mod app;
 mod engine;
 mod prefs;
 mod presets;
+mod route_editor;
 mod sidecar;
 mod sysproxy;
 mod view;
