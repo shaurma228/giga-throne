@@ -85,11 +85,12 @@ sidecar/          бинарь Throne для разработки (в git не �
 ```sh
 cd ~/git/Throne && mkdir -p build && curl -fLso build/srslist.h \
   https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h
-cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo && ninja -C build Throne
+cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DINPUT_VERSION="1.4.0-beta.4+route-api.$(git rev-parse --short HEAD)" && ninja -C build Throne
 cp build/Throne ~/git/giga-throne/sidecar/Throne/Throne
 ```
 `ThroneCore` в `sidecar/Throne/` — из релиза 1.4.0-beta.4 (совместим, пока форк на том же теге); стоковый бинарь лежит
-рядом как `Throne.release`. Что именно стоит — в `sidecar/VERSION`. Без форка приложение работает, но экран маршрутов
+рядом как `Throne.release`. Без `INPUT_VERSION` бинарь сообщает пустую версию (`Status.version == ""`). Что именно стоит — в `sidecar/VERSION`. Без форка приложение работает, но экран маршрутов
 покажет, что движку не хватает API. Тесты с настоящим движком: `cargo test -p giga-throne -- --ignored`.
 
 ## Дизайн
