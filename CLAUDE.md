@@ -81,7 +81,7 @@ sidecar/          бинарь Throne для разработки (в git не �
 
 **Нужен Throne из нашего форка.** Стоковый Throne не умеет управлять маршрутами через API, поэтому эндпоинты
 `/v1/routes*` и `/v1/rule-sets` (спека: `docs/throne-api/routes-proposal.md`) живут в форке `~/git/Throne`, ветка
-`feat/route-api` (от тега 1.4.0-beta.4, PR в апстрим планируется). Собирается только Qt-часть, Go не нужен:
+`feat/route-api` (от тега 1.4.0-beta.4). Собирается только Qt-часть, Go не нужен:
 ```sh
 cd ~/git/Throne && mkdir -p build && curl -fLso build/srslist.h \
   https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h

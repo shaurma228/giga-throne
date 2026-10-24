@@ -1,8 +1,7 @@
-# Routing profiles over the Throne API — proposal
+# Routing profiles over the Throne API
 
-Status: **draft**, implemented (not yet built) in our fork (`~/git/Throne`, branch `feat/route-api`, based on tag 1.4.0-beta.4)
-and meant as an upstream PR to throneproj/Throne + throneproj/Throne-api. Until it is merged, giga-throne's
-sidecar must be built from the fork.
+Status: implemented in our Throne fork (`~/git/Throne`, branch `feat/route-api`, based on tag 1.4.0-beta.4);
+giga-throne's sidecar must be built from the fork.
 
 Why: headless Throne can only list routing profiles and pick the active one (`GET /v1/routes`,
 `PUT /v1/routes/active`). Importing the routeprofiles presets (`throne://route/…`, `throne://remoteroute/…`),
