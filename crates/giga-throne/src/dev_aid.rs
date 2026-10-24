@@ -1,19 +1,43 @@
 //! Debug-only startup shortcuts for checking screens by hand and in screenshots.
 //!
 //! `GIGA_THRONE_PAGE` moves the app to a page once at startup: `0` Home (the
-//! default), `1` Routes, `2` the editor of a new route (the same path as
+//! default), `1` Routes, `3` Servers, `2` the editor of a new route (the same path as
 //! "Свой маршрут"), `2:<id>` the editor of route `<id>`. The editor needs the
 //! engine, so the editor pages wait until it reports ready.
 //! `GIGA_THRONE_EDITOR_MODE=advanced` starts that first editor in "Продвинуто".
-//! Release builds ignore both variables.
+//! `GIGA_THRONE_DEMO_SERVERS=1` fills an engine with no servers with nine dummy
+//! profiles in the group "Демо", once per run, to look at the Servers grid.
+//! Release builds ignore these variables.
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Weak};
-use tracing::warn;
+use throne_api::types::{CreateGroupRequest, CreateGroupResponse, GroupsResponse, ImportResponse};
+use throne_api::{Client, Method};
+use tracing::{info, warn};
 
 use crate::AppWindow;
+
+/// Name of the group that `GIGA_THRONE_DEMO_SERVERS` fills.
+const DEMO_GROUP: &str = "Демо";
+
+/// Cities of the dummy profiles. Each is an HTTP proxy to a closed port: it never works.
+const DEMO_CITIES: [&str; 9] = [
+    "Амстердам",
+    "Франкфурт",
+    "Хельсинки",
+    "Стамбул",
+    "Варшава",
+    "Нью-Йорк",
+    "Токио",
+    "Стокгольм",
+    "Лондон",
+];
+
+/// Set once the demo servers were tried in this run.
+static DEMO_TRIED: AtomicBool = AtomicBool::new(false);
 
 /// How long the startup page waits for the engine before it gives up.
 const ENGINE_WAIT: Duration = Duration::from_secs(60);
@@ -29,6 +53,7 @@ thread_local! {
 #[derive(Debug, PartialEq)]
 enum StartPage {
     Routes,
+    Servers,
     NewRoute,
     Route(i32),
 }
@@ -48,6 +73,7 @@ pub fn apply_startup(window: &AppWindow) {
     match parse_start_page(&value) {
         Ok(None) => {}
         Ok(Some(StartPage::Routes)) => window.set_page(1),
+        Ok(Some(StartPage::Servers)) => window.set_page(3),
         Ok(Some(start)) => open_when_ready(window.as_weak(), start, Instant::now()),
         Err(err) => warn!("GIGA_THRONE_PAGE ignored: {err}"),
     }
@@ -64,11 +90,12 @@ fn parse_start_page(value: &str) -> Result<Option<StartPage>, String> {
     match value {
         "0" => Ok(None),
         "1" => Ok(Some(StartPage::Routes)),
+        "3" => Ok(Some(StartPage::Servers)),
         "2" => Ok(Some(StartPage::NewRoute)),
         _ => {
             let id = value
                 .strip_prefix("2:")
-                .ok_or_else(|| format!("unknown page {value:?}, expected 0, 1, 2 or 2:<id>"))?;
+                .ok_or_else(|| format!("unknown page {value:?}, expected 0, 1, 2, 2:<id> or 3"))?;
             let id = id
                 .parse::<i32>()
                 .map_err(|_| format!("bad route id {id:?}"))?;
@@ -95,9 +122,68 @@ fn open_when_ready(weak: Weak<AppWindow>, start: StartPage, started: Instant) {
         match start {
             StartPage::NewRoute => window.invoke_create_route(),
             StartPage::Route(id) => window.invoke_edit_route(id),
-            StartPage::Routes => {}
+            StartPage::Routes | StartPage::Servers => {}
         }
     });
+}
+
+/// Debug only: with `GIGA_THRONE_DEMO_SERVERS=1`, fills an engine that has no
+/// servers with nine dummy profiles in the group "Демо". Runs once per process and
+/// never when a "Демо" group already exists. Errors are logged, not returned.
+pub async fn seed_demo_servers(client: &Client) {
+    if !cfg!(debug_assertions)
+        || std::env::var("GIGA_THRONE_DEMO_SERVERS").as_deref() != Ok("1")
+        || DEMO_TRIED.swap(true, Ordering::Relaxed)
+    {
+        return;
+    }
+    if let Err(err) = seed(client).await {
+        warn!("demo servers were not added: {err}");
+    }
+}
+
+async fn seed(client: &Client) -> throne_api::Result<()> {
+    let groups: GroupsResponse = client
+        .request_json(Method::Get, "/v1/groups", None, None)
+        .await?;
+    let has_demo = groups.groups.iter().any(|group| group.name == DEMO_GROUP);
+    let servers: u64 = groups.groups.iter().map(|group| group.profile_count).sum();
+    if has_demo || servers > 0 {
+        return Ok(());
+    }
+    let body = serde_json::to_value(CreateGroupRequest {
+        name: DEMO_GROUP.to_owned(),
+        url: None,
+        auto_update: None,
+        update: None,
+        wait: None,
+        timeout: None,
+    })?;
+    let created: CreateGroupResponse = client
+        .request_json(Method::Post, "/v1/groups", None, Some(body))
+        .await?;
+    let text = DEMO_CITIES
+        .iter()
+        .map(|city| format!("http://127.0.0.1:9#{city}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let imported: ImportResponse = client
+        .request_json(
+            Method::Post,
+            "/v1/import",
+            None,
+            Some(serde_json::json!({
+                "as": "profiles",
+                "text": text,
+                "group": created.group.id,
+            })),
+        )
+        .await?;
+    info!(
+        "added {} demo servers to {DEMO_GROUP:?}",
+        imported.imported.unwrap_or(0)
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -110,11 +196,12 @@ mod tests {
         assert_eq!(parse_start_page("1"), Ok(Some(StartPage::Routes)));
         assert_eq!(parse_start_page("2"), Ok(Some(StartPage::NewRoute)));
         assert_eq!(parse_start_page("2:7"), Ok(Some(StartPage::Route(7))));
+        assert_eq!(parse_start_page("3"), Ok(Some(StartPage::Servers)));
     }
 
     #[test]
     fn bad_start_page_values_are_refused() {
-        assert!(parse_start_page("3").is_err());
+        assert!(parse_start_page("4").is_err());
         assert!(parse_start_page("2:").is_err());
         assert!(parse_start_page("2:x").is_err());
         assert!(parse_start_page("").is_err());

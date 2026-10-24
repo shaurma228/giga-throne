@@ -19,11 +19,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use throne_api::types::RouteShare;
 use throne_api::types::{
-    ConnectionState, GetSettingsResponse, ImportResponse, InboundStatus, LiveStatsResponse,
-    Profile, ProfilesResponse, Route, SettingsMap, Status,
+    ConnectionState, CreateGroupRequest, CreateGroupResponse, DeleteGroupRequest,
+    DeleteGroupResponse, DeleteProfilesRequest, DeleteProfilesResponse, GetSettingsResponse, Group,
+    GroupUpdateRequest, GroupUpdateResponse, GroupsResponse, ImportResponse, InboundStatus, Job,
+    JobKind, JobState, LiveStatsResponse, Profile, ProfilesResponse, Route, SettingsMap,
+    StartTestRequest, Status,
 };
 use throne_api::{Client, Error, Method};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{watch, Notify};
 use tokio::time::{interval_at, sleep};
 use tracing::{debug, info, warn};
@@ -31,6 +34,7 @@ use tracing::{debug, info, warn};
 use crate::editor_ui::{self, EditorEvent, SavePlan};
 use crate::prefs::{self, Prefs};
 use crate::presets::{self, ImportKind, PresetPlan};
+use crate::servers::{self, ServersBusy, ServersInput, ServersView, TestSelection, ALL_GROUPS};
 use crate::sidecar::SidecarState;
 use crate::sysproxy::{proxy_host, SystemProxy};
 use crate::view::{
@@ -107,6 +111,26 @@ pub enum Command {
         share: RouteShare,
         as_copy: bool,
     },
+    /// Latency test of the selected tab, or of every profile on "Все".
+    TestLatency,
+    /// Stops the running test.
+    StopTest,
+    /// Adds a subscription group and selects it.
+    AddSubscription { url: String, name: String },
+    /// Imports what the "Ссылки" box holds into this group, or into Throne's default group.
+    ImportInto { text: String, group: Option<i64> },
+    /// Downloads this subscription group again.
+    UpdateGroup(i64),
+    /// Deletes this group and its profiles.
+    DeleteGroup(i64),
+    /// Deletes this profile.
+    DeleteProfile(i64),
+    /// Shows this group's tab on the Servers page, or "Все" for -1. Remembered.
+    SelectGroup(i64),
+    /// The search text of the Servers page. Not remembered.
+    SetSearch(String),
+    /// Sorts the Servers page by ping (`true`) or as the groups list them. Not remembered.
+    SetSort(bool),
 }
 
 /// Connects the UI callbacks of `window` to commands. The receiver goes to [`run`].
@@ -153,10 +177,62 @@ pub fn bind_callbacks(window: &AppWindow) -> UnboundedReceiver<Command> {
         let _ = edit.send(Command::OpenRouteEditor(Some(i64::from(id))));
     });
     editor_ui::bind(window, tx.clone());
+    bind_servers(window, &tx);
     window.on_import_link(move |text| {
         let _ = tx.send(Command::Import(text.to_string()));
     });
     rx
+}
+
+/// Connects the callbacks of the Servers page to commands.
+fn bind_servers(window: &AppWindow, tx: &UnboundedSender<Command>) {
+    let send = tx.clone();
+    window.on_servers_select(move |id| {
+        let _ = send.send(Command::SelectGroup(i64::from(id)));
+    });
+    let send = tx.clone();
+    window.on_servers_search(move |query| {
+        let _ = send.send(Command::SetSearch(query.to_string()));
+    });
+    let send = tx.clone();
+    window.on_servers_sort(move |by_ping| {
+        let _ = send.send(Command::SetSort(by_ping));
+    });
+    let send = tx.clone();
+    window.on_servers_test(move || {
+        let _ = send.send(Command::TestLatency);
+    });
+    let send = tx.clone();
+    window.on_servers_stop_test(move || {
+        let _ = send.send(Command::StopTest);
+    });
+    let send = tx.clone();
+    window.on_servers_add_links(move |text, group| {
+        let group = (group >= 0).then(|| i64::from(group));
+        let _ = send.send(Command::ImportInto {
+            text: text.to_string(),
+            group,
+        });
+    });
+    let send = tx.clone();
+    window.on_servers_add_sub(move |url, name| {
+        let _ = send.send(Command::AddSubscription {
+            url: url.to_string(),
+            name: name.to_string(),
+        });
+    });
+    let send = tx.clone();
+    window.on_servers_update(move |id| {
+        let _ = send.send(Command::UpdateGroup(i64::from(id)));
+    });
+    let send = tx.clone();
+    window.on_servers_delete_group(move |id| {
+        let _ = send.send(Command::DeleteGroup(i64::from(id)));
+    });
+    let send = tx.clone();
+    window.on_servers_delete_profile(move |id| {
+        let _ = send.send(Command::DeleteProfile(i64::from(id)));
+    });
 }
 
 /// Runs the poll loop and the command loop until the sidecar stops.
@@ -220,6 +296,7 @@ impl Engine {
             if let Err(err) = self.fix_ports().await {
                 warn!("could not check Throne's ports: {err}");
             }
+            crate::dev_aid::seed_demo_servers(&self.client).await;
 
             let mut tick = interval_at(tokio::time::Instant::now() + POLL_EVERY, POLL_EVERY);
             let mut profiles_at: Option<Instant> = None;
@@ -282,7 +359,66 @@ impl Engine {
                 Ok(routes) => self.shared.update(|st| st.routes = routes),
                 Err(err) => debug!("routes poll failed: {err}"),
             }
+            match self
+                .client
+                .request_json::<GroupsResponse>(Method::Get, "/v1/groups", None, None)
+                .await
+            {
+                Ok(list) => self.shared.update(|st| st.groups = list.groups),
+                Err(err) => debug!("groups poll failed: {err}"),
+            }
         }
+        if self.shared.read(|st| st.servers_test.is_some()) {
+            self.poll_test().await;
+        }
+    }
+
+    /// Follows the running test: its progress from the profiles, its end from the job.
+    async fn poll_test(&self) {
+        let Some(job_id) = self
+            .shared
+            .read(|st| st.servers_test.as_ref().map(|test| test.job_id))
+        else {
+            return;
+        };
+        let job: Job = match self
+            .client
+            .request_json(Method::Get, &format!("/v1/tests/{job_id}"), None, None)
+            .await
+        {
+            Ok(job) => job,
+            Err(err) => {
+                debug!("test poll failed: {err}");
+                return;
+            }
+        };
+        let profiles = self
+            .client
+            .request_json::<ProfilesResponse>(Method::Get, "/v1/profiles", None, None)
+            .await
+            .map(|list| list.profiles)
+            .ok();
+        self.shared.update(|st| {
+            if let Some(profiles) = profiles {
+                st.set_profiles(profiles);
+            }
+            if job.state == JobState::Running {
+                let done = servers::tested_count(&st.profiles, &job);
+                if let Some(test) = st.servers_test.as_mut() {
+                    test.total = job.profile_ids.len();
+                    test.done = done;
+                }
+            } else {
+                // Throne can mark the job done a moment before it writes the results into
+                // its list, so the job's copies of the profiles are the ones to keep.
+                if let Some(results) = &job.results {
+                    let mut merged = st.profiles.clone();
+                    servers::merge_results(&mut merged, results);
+                    st.set_profiles(merged);
+                }
+                st.servers_test = None;
+            }
+        });
     }
 
     async fn live_stats(&self) -> Option<LiveStatsResponse> {
@@ -323,10 +459,280 @@ impl Engine {
             Command::SetRegion(region) => self.set_region(&region),
             Command::OpenRouteEditor(id) => self.open_route_editor(id).await,
             Command::SaveRoute { id, share, as_copy } => self.save_route(id, share, as_copy).await,
+            Command::TestLatency => {
+                let result = self.start_test().await;
+                self.report_servers(result);
+            }
+            Command::StopTest => {
+                let result = self.stop_test().await;
+                self.report_servers(result);
+            }
+            Command::AddSubscription { url, name } => {
+                let work = self.add_subscription(&url, &name);
+                let result = self
+                    .while_servers_busy(ServersBusy::AddSubscription, work)
+                    .await;
+                self.report_servers(result);
+            }
+            Command::ImportInto { text, group } => {
+                let work = self.import_into(&text, group);
+                let result = self.while_servers_busy(ServersBusy::Import, work).await;
+                self.report_servers(result);
+            }
+            Command::UpdateGroup(id) => {
+                let work = self.update_group(id);
+                let result = self.while_servers_busy(ServersBusy::Update(id), work).await;
+                self.report_servers(result);
+            }
+            Command::DeleteGroup(id) => {
+                let work = self.delete_group(id);
+                let result = self
+                    .while_servers_busy(ServersBusy::DeleteGroup, work)
+                    .await;
+                self.report_servers(result);
+            }
+            Command::DeleteProfile(id) => {
+                let result = self.delete_profile(id).await;
+                self.report_servers(result);
+            }
+            Command::SelectGroup(id) => self.select_group(id),
+            Command::SetSearch(query) => self.shared.update(|st| st.servers_query = query),
+            Command::SetSort(by_ping) => self.shared.update(|st| st.servers_by_ping = by_ping),
         }
         let status = self.shared.read(|st| st.status.clone());
         self.sync_system_proxy(status.as_ref());
         self.wake.notify_one();
+    }
+
+    /// Shows `busy` on the Servers page while `work` runs.
+    async fn while_servers_busy<T>(&self, busy: ServersBusy, work: impl Future<Output = T>) -> T {
+        self.shared.update(|st| st.servers_busy = Some(busy));
+        let result = work.await;
+        self.shared.update(|st| st.servers_busy = None);
+        result
+    }
+
+    /// Shows the result of a Servers command under the page.
+    fn report_servers(&self, result: Result<String, String>) {
+        match result {
+            Ok(text) => flash(&self.shared, Flash::Servers { bad: false }, text),
+            Err(text) => {
+                warn!("servers command failed: {text}");
+                flash(&self.shared, Flash::Servers { bad: true }, text);
+            }
+        }
+    }
+
+    /// Remembers the group tab of the Servers page. Unknown ids are shown as "Все".
+    fn select_group(&self, id: i64) {
+        let prefs = self.shared.read(|st| Prefs {
+            servers_group: id,
+            ..st.prefs.clone()
+        });
+        self.save_prefs(prefs);
+    }
+
+    /// Starts a latency test of the selected tab. The poll loop follows it to its end.
+    async fn start_test(&self) -> Result<String, String> {
+        let (selection, running) = self.shared.read(|st| {
+            let selected = servers::resolve_selected(&st.groups, st.prefs.servers_group);
+            (
+                servers::test_selection(&st.profiles, selected),
+                st.servers_test.is_some(),
+            )
+        });
+        if running {
+            return Err(TEST_BUSY_TEXT.to_owned());
+        }
+        let selection = selection.ok_or_else(|| "Нет серверов для теста".to_owned())?;
+        let (group, profiles) = match selection {
+            TestSelection::Group(id) => (Some(id), None),
+            TestSelection::Profiles(ids) => (None, Some(ids)),
+        };
+        let body = serde_json::to_value(StartTestRequest {
+            kind: JobKind::Latency,
+            profiles,
+            group,
+            name: None,
+            wait: None,
+            timeout: None,
+        })
+        .map_err(|err| format!("Ошибка: {err}"))?;
+        let job: Job = self
+            .client
+            .request_json(Method::Post, "/v1/tests", None, Some(body))
+            .await
+            .map_err(|err| test_error_text(&err))?;
+        self.shared.update(|st| {
+            st.servers_test = Some(TestRun {
+                job_id: job.id,
+                total: job.profile_ids.len(),
+                done: 0,
+            });
+        });
+        Ok(String::new())
+    }
+
+    /// Stops the running test. A test that does not stop in time keeps running in the poll loop.
+    async fn stop_test(&self) -> Result<String, String> {
+        let Some(job_id) = self
+            .shared
+            .read(|st| st.servers_test.as_ref().map(|test| test.job_id))
+        else {
+            return Ok(String::new());
+        };
+        let job: Job = self
+            .client
+            .request_json(Method::Delete, &format!("/v1/tests/{job_id}"), None, None)
+            .await
+            .map_err(|err| test_error_text(&err))?;
+        if job.state == JobState::Running {
+            return Ok(String::new());
+        }
+        self.shared.update(|st| st.servers_test = None);
+        Ok("Тест остановлен".to_owned())
+    }
+
+    /// Adds a subscription group, selects it and downloads it once.
+    async fn add_subscription(&self, url: &str, name: &str) -> Result<String, String> {
+        let url = url.trim();
+        if !is_http_url(url) {
+            return Err("Нужна ссылка http или https".to_owned());
+        }
+        let name = match name.trim() {
+            "" => DEFAULT_SUBSCRIPTION_NAME,
+            name => name,
+        };
+        let body = serde_json::to_value(CreateGroupRequest {
+            name: name.to_owned(),
+            url: Some(url.to_owned()),
+            auto_update: None,
+            update: Some(true),
+            wait: None,
+            timeout: Some(IMPORT_WAIT_SECS),
+        })
+        .map_err(|err| format!("Ошибка: {err}"))?;
+        let created: CreateGroupResponse = self
+            .client
+            .request_json(Method::Post, "/v1/groups", None, Some(body))
+            .await
+            .map_err(|err| group_error_text(&err))?;
+        let prefs = self.shared.read(|st| Prefs {
+            servers_group: created.group.id,
+            ..st.prefs.clone()
+        });
+        self.save_prefs(prefs);
+        self.shared.update(|st| st.clear_servers_sub = true);
+        match created.update {
+            Some(update) if !update.ok => Err(format!(
+                "Подписка добавлена, но не обновилась: {}",
+                update.error.unwrap_or_default()
+            )),
+            Some(update) => Ok(format!(
+                "Подписка добавлена: {}",
+                servers::servers_count_text(update.added.unwrap_or(0))
+            )),
+            None => Ok("Подписка добавлена, обновится в фоне".to_owned()),
+        }
+    }
+
+    /// Adds what the "Ссылки" box holds to `group`, or to Throne's default group for `None`.
+    async fn import_into(&self, text: &str, group: Option<i64>) -> Result<String, String> {
+        let Some(mut body) = import_request(text) else {
+            return Err("Вставь ссылки или ссылку на подписку".to_owned());
+        };
+        if let Some(group) = group {
+            body["group"] = json!(group);
+        }
+        let response: ImportResponse = self
+            .client
+            .request_json(Method::Post, "/v1/import", None, Some(body))
+            .await
+            .map_err(|err| group_error_text(&err))?;
+        let outcome = servers_import_outcome(&response);
+        if outcome.is_ok() && response.state.is_none() {
+            self.shared.update(|st| st.clear_servers_links = true);
+        }
+        outcome
+    }
+
+    /// Downloads a subscription group again. Its profiles follow the poll.
+    async fn update_group(&self, id: i64) -> Result<String, String> {
+        let body = serde_json::to_value(GroupUpdateRequest {
+            wait: None,
+            timeout: Some(IMPORT_WAIT_SECS),
+        })
+        .map_err(|err| format!("Ошибка: {err}"))?;
+        let response: GroupUpdateResponse = self
+            .client
+            .request_json(
+                Method::Post,
+                &format!("/v1/groups/{id}/update"),
+                None,
+                Some(body),
+            )
+            .await
+            .map_err(|err| group_error_text(&err))?;
+        match response.update {
+            Some(update) if !update.ok => Err(format!(
+                "Не удалось обновить: {}",
+                update.error.unwrap_or_default()
+            )),
+            Some(update) => Ok(format!(
+                "Подписка обновлена: +{}, -{}",
+                update.added.unwrap_or(0),
+                update.removed.unwrap_or(0)
+            )),
+            None => Ok("Обновление идёт в фоне".to_owned()),
+        }
+    }
+
+    /// Deletes a group. When it was the tab on show, the page goes back to "Все".
+    async fn delete_group(&self, id: i64) -> Result<String, String> {
+        let body = serde_json::to_value(DeleteGroupRequest {
+            wait: None,
+            timeout: Some(DELETE_WAIT_SECS),
+        })
+        .map_err(|err| format!("Ошибка: {err}"))?;
+        let response: DeleteGroupResponse = self
+            .client
+            .request_json(
+                Method::Delete,
+                &format!("/v1/groups/{id}"),
+                None,
+                Some(body),
+            )
+            .await
+            .map_err(|err| group_error_text(&err))?;
+        if self.shared.read(|st| st.prefs.servers_group == id) {
+            self.select_group(ALL_GROUPS);
+        }
+        Ok(if response.state.is_some() {
+            "Группа удаляется…".to_owned()
+        } else {
+            "Группа удалена".to_owned()
+        })
+    }
+
+    async fn delete_profile(&self, id: i64) -> Result<String, String> {
+        let body = serde_json::to_value(DeleteProfilesRequest {
+            profiles: Some(vec![id]),
+            group: None,
+            name: None,
+            wait: None,
+            timeout: Some(DELETE_WAIT_SECS),
+        })
+        .map_err(|err| format!("Ошибка: {err}"))?;
+        let response: DeleteProfilesResponse = self
+            .client
+            .request_json(Method::Delete, "/v1/profiles", None, Some(body))
+            .await
+            .map_err(|err| error_text(&err))?;
+        Ok(if response.state.is_some() {
+            "Сервер удаляется…".to_owned()
+        } else {
+            "Сервер удалён".to_owned()
+        })
     }
 
     /// Flips the "Системный прокси" preference and saves it. The caller syncs the proxy.
@@ -766,6 +1172,20 @@ async fn command_loop(
                     engine.sync_system_proxy(None);
                 }
                 Command::SetRegion(region) => engine.set_region(&region),
+                Command::SelectGroup(id) => engine.select_group(id),
+                Command::SetSearch(query) => engine.shared.update(|st| st.servers_query = query),
+                Command::SetSort(by_ping) => {
+                    engine.shared.update(|st| st.servers_by_ping = by_ping);
+                }
+                Command::TestLatency
+                | Command::StopTest
+                | Command::AddSubscription { .. }
+                | Command::ImportInto { .. }
+                | Command::UpdateGroup(_)
+                | Command::DeleteGroup(_)
+                | Command::DeleteProfile(_) => {
+                    engine.report_servers(Err(ENGINE_NOT_READY_TEXT.to_owned()));
+                }
                 Command::Toggle | Command::Connect(_) | Command::Import(_) => {
                     flash_error(&engine.shared, ENGINE_NOT_READY_TEXT.to_owned());
                 }
@@ -789,6 +1209,8 @@ enum Flash {
     Import,
     /// The info or error line of the Routes screen.
     Routes { bad: bool },
+    /// The info or error line of the Servers page.
+    Servers { bad: bool },
 }
 
 /// Shows an error text for [`ERROR_SHOWN_FOR`], unless a newer one replaces it.
@@ -819,6 +1241,11 @@ fn flash(shared: &Arc<Shared>, target: Flash, text: String) {
             seq = st.route_seq;
             st.route_note = RouteNote { text, bad };
         }
+        Flash::Servers { bad } => {
+            st.servers_seq += 1;
+            seq = st.servers_seq;
+            st.servers_note = RouteNote { text, bad };
+        }
     });
     let shared = Arc::clone(shared);
     tokio::spawn(async move {
@@ -827,6 +1254,9 @@ fn flash(shared: &Arc<Shared>, target: Flash, text: String) {
             Flash::Home if st.error_seq == seq => st.error.clear(),
             Flash::Import if st.import_seq == seq => st.import_result.clear(),
             Flash::Routes { .. } if st.route_seq == seq => st.route_note = RouteNote::default(),
+            Flash::Servers { .. } if st.servers_seq == seq => {
+                st.servers_note = RouteNote::default();
+            }
             _ => {}
         });
     });
@@ -924,6 +1354,29 @@ struct State {
     clear_import: bool,
     profiles_rev: u64,
     servers_rev: u64,
+    groups: Vec<Group>,
+    /// The Servers page as last sent to the UI, to send it again only when it changes.
+    servers_sent: Option<ServersView>,
+    servers_query: String,
+    servers_by_ping: bool,
+    /// A latency test, followed by the poll loop until Throne reports it finished.
+    servers_test: Option<TestRun>,
+    servers_busy: Option<ServersBusy>,
+    servers_note: RouteNote,
+    servers_seq: u64,
+    /// Clear the "Ссылки" box and the subscription fields (sent with the next frame).
+    clear_servers_links: bool,
+    clear_servers_sub: bool,
+}
+
+/// A latency test that is running in Throne.
+#[derive(Debug, Clone, Copy)]
+struct TestRun {
+    job_id: i64,
+    /// Profiles in the test.
+    total: usize,
+    /// Profiles measured since the test started.
+    done: usize,
 }
 
 impl State {
@@ -1011,7 +1464,30 @@ impl State {
             error: self.error.clone(),
             clear_import,
             system_proxy: self.prefs.system_proxy,
+            servers_page: self.servers_frame(),
+            clear_servers_links: std::mem::take(&mut self.clear_servers_links),
+            clear_servers_sub: std::mem::take(&mut self.clear_servers_sub),
         }
+    }
+
+    /// The Servers page, when it differs from the one last sent.
+    fn servers_frame(&mut self) -> Option<ServersView> {
+        let view = servers::servers_view(&ServersInput {
+            groups: &self.groups,
+            profiles: &self.profiles,
+            selected: self.prefs.servers_group,
+            query: &self.servers_query,
+            by_ping: self.servers_by_ping,
+            test: self.servers_test.map(|test| (test.done, test.total)),
+            busy: self.servers_busy.clone(),
+            note: self.servers_note.clone(),
+            now: now_secs(),
+        });
+        if self.servers_sent.as_ref() == Some(&view) {
+            return None;
+        }
+        self.servers_sent = Some(view.clone());
+        Some(view)
     }
 }
 
@@ -1130,6 +1606,15 @@ pub fn import_summary(response: &ImportResponse) -> String {
 /// Shown when the "Всё через VPN" mode has no "Default" profile to activate.
 const NO_DEFAULT_ROUTE_TEXT: &str = "Нет профиля Default";
 
+/// Seconds Throne may take to delete a group or profile before answering 202.
+const DELETE_WAIT_SECS: u64 = 30;
+
+/// Name of a subscription added with an empty name.
+const DEFAULT_SUBSCRIPTION_NAME: &str = "Подписка";
+
+/// Shown when a test is asked for while another one runs.
+const TEST_BUSY_TEXT: &str = "Тест уже идёт";
+
 /// Russian text for a failed routing request.
 ///
 /// `endpoint_missing` says that a 404 means the routing endpoint itself is not
@@ -1159,6 +1644,67 @@ pub fn editor_error_text(err: &Error) -> String {
         }
         _ => route_error_text(err, false),
     }
+}
+
+/// Russian text for a failed test request.
+pub fn test_error_text(err: &Error) -> String {
+    match err {
+        Error::Api { code, .. } => match code.as_str() {
+            "busy" => TEST_BUSY_TEXT.to_owned(),
+            "not_found" => "Группа не найдена".to_owned(),
+            "no_profiles" => "Нет серверов для теста".to_owned(),
+            _ => error_text(err),
+        },
+        _ => error_text(err),
+    }
+}
+
+/// Russian text for a failed group request.
+pub fn group_error_text(err: &Error) -> String {
+    match err {
+        Error::Api { code, .. } => match code.as_str() {
+            "not_found" => "Группа не найдена".to_owned(),
+            "last_group" => "Нельзя удалить последнюю группу".to_owned(),
+            "not_subscription" => "Эта группа не подписка".to_owned(),
+            "group_archived" => "Группа в архиве".to_owned(),
+            "editing" => "Группа открыта в редакторе Throne".to_owned(),
+            "subscription_group" => {
+                "В подписку нельзя импортировать: при обновлении серверы пропадут".to_owned()
+            }
+            _ => error_text(err),
+        },
+        _ => error_text(err),
+    }
+}
+
+/// Text of the Servers page after an import: the counts and the first problem the import
+/// reported. Nothing imported is an error.
+pub fn servers_import_outcome(response: &ImportResponse) -> Result<String, String> {
+    if response.state.is_some() {
+        return Ok("Импорт продолжается в фоне".to_owned());
+    }
+    let detail = response
+        .errors
+        .first()
+        .cloned()
+        .or_else(|| response.issues.first().map(|issue| issue.message.clone()))
+        .filter(|detail| !detail.trim().is_empty());
+    if response.imported.unwrap_or(0) == 0 {
+        return Err(match detail {
+            Some(detail) => format!("Ничего не импортировано: {detail}"),
+            None => "Ничего не импортировано".to_owned(),
+        });
+    }
+    let summary = import_summary(response);
+    Ok(match detail {
+        Some(detail) => format!("{summary} · {detail}"),
+        None => summary,
+    })
+}
+
+/// Whether `text` starts with an http or https scheme.
+fn is_http_url(text: &str) -> bool {
+    text.starts_with("http://") || text.starts_with("https://")
 }
 
 /// Russian text for an API error.
@@ -1495,6 +2041,201 @@ mod tests {
         let stopped = engine.shared.read(|st| st.status.as_ref().map(|s| s.state));
         println!("after toggle: state = {stopped:?}");
         assert_eq!(stopped, Some(ConnectionState::Idle));
+
+        handle.shutdown().await;
+        state
+            .wait_for(|s| *s == SidecarState::Stopped)
+            .await
+            .expect("state channel open");
+    }
+
+    #[test]
+    fn test_group_and_import_errors_have_russian_texts() {
+        assert_eq!(test_error_text(&api_error("busy", "")), TEST_BUSY_TEXT);
+        assert_eq!(
+            test_error_text(&api_error("no_profiles", "")),
+            "Нет серверов для теста"
+        );
+        assert_eq!(
+            group_error_text(&api_error("last_group", "")),
+            "Нельзя удалить последнюю группу"
+        );
+        assert_eq!(
+            group_error_text(&api_error("not_subscription", "")),
+            "Эта группа не подписка"
+        );
+        assert_eq!(
+            group_error_text(&api_error("busy", "")),
+            "Подожди, движок занят"
+        );
+    }
+
+    #[test]
+    fn servers_import_reports_counts_and_the_first_problem() {
+        use throne_api::types::{ImportIssue, ImportIssueSeverity};
+        let mut response = ImportResponse {
+            group: 1,
+            state: None,
+            imported: Some(2),
+            profile_ids: vec![],
+            failed: Some(1),
+            warned: None,
+            issues: vec![ImportIssue {
+                severity: ImportIssueSeverity::Error,
+                field: "port".to_owned(),
+                message: "bad port".to_owned(),
+                count: 1,
+                examples: vec![],
+            }],
+            errors: vec![],
+        };
+        assert_eq!(
+            servers_import_outcome(&response),
+            Ok("Добавлено: 2, с ошибками: 1 · bad port".to_owned())
+        );
+        response.imported = Some(0);
+        assert_eq!(
+            servers_import_outcome(&response),
+            Err("Ничего не импортировано: bad port".to_owned())
+        );
+        response.imported = None;
+        response.issues.clear();
+        response.errors = vec!["parse error".to_owned()];
+        assert_eq!(
+            servers_import_outcome(&response),
+            Err("Ничего не импортировано: parse error".to_owned())
+        );
+        response.state = Some("queued".to_owned());
+        assert_eq!(
+            servers_import_outcome(&response),
+            Ok("Импорт продолжается в фоне".to_owned())
+        );
+    }
+
+    /// The Servers page against the real Throne: an import into a new plain group, a
+    /// latency test followed to its end, a profile deleted and the group deleted.
+    #[tokio::test]
+    #[ignore = "needs the real Throne binary in sidecar/Throne"]
+    async fn servers_e2e_real_throne() {
+        use crate::sidecar::{Sidecar, SidecarConfig, SidecarState};
+        use std::path::PathBuf;
+        use throne_api::types::CreateGroupResponse;
+
+        let binary = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../sidecar/Throne/Throne"
+        ));
+        let dir = tempfile::tempdir().expect("temp dir");
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("bind")
+            .local_addr()
+            .expect("local addr")
+            .port();
+        let config = SidecarConfig {
+            binary,
+            data_root: dir.path().to_path_buf(),
+            port,
+        };
+
+        let handle = Sidecar::start(config).await.expect("start sidecar");
+        let mut state = handle.state();
+        state.wait_for(is_ready).await.expect("state channel open");
+
+        let sysproxy = SystemProxy::with_runner(
+            dir.path(),
+            Arc::new(crate::sysproxy::runner::FakeRunner::new()),
+        );
+        let engine = Engine::new(
+            handle.client(),
+            port,
+            Box::new(|_| {}),
+            Arc::new(sysproxy),
+            dir.path().join("prefs.json"),
+        );
+        engine.fix_ports().await.expect("port check");
+
+        // The import box only adds to a plain group the user chose, so the test group
+        // is made through the API.
+        let created: CreateGroupResponse = engine
+            .client
+            .request_json(
+                Method::Post,
+                "/v1/groups",
+                None,
+                Some(json!({"name": "E2E"})),
+            )
+            .await
+            .expect("POST /v1/groups");
+        let group = created.group.id;
+        let members = |engine: &Engine| {
+            engine.shared.read(|st| {
+                st.profiles
+                    .iter()
+                    .filter(|p| p.group == group)
+                    .map(|p| p.id)
+                    .collect::<Vec<i64>>()
+            })
+        };
+
+        let text = "http://127.0.0.1:9#e2e-a\nhttp://127.0.0.1:9#e2e-b".to_owned();
+        engine
+            .handle(Command::ImportInto {
+                text,
+                group: Some(group),
+            })
+            .await;
+        let note = engine.shared.read(|st| st.servers_note.clone());
+        println!("import note: {note:?}");
+        assert!(note.text.starts_with("Добавлено: 2"), "{note:?}");
+        engine.refresh(true).await;
+        assert_eq!(members(&engine).len(), 2, "the profiles are in the group");
+
+        engine.handle(Command::SelectGroup(group)).await;
+        engine.handle(Command::TestLatency).await;
+        let note = engine.shared.read(|st| st.servers_note.clone());
+        assert!(!note.bad, "the test did not start: {note:?}");
+        // The poll loop follows the job; here it runs by hand, once a second.
+        let started = Instant::now();
+        while engine.shared.read(|st| st.servers_test.is_some()) {
+            assert!(
+                started.elapsed() < Duration::from_secs(120),
+                "the test did not finish"
+            );
+            sleep(Duration::from_secs(1)).await;
+            engine.refresh(false).await;
+        }
+        let latencies: Vec<i64> = engine.shared.read(|st| {
+            st.profiles
+                .iter()
+                .filter(|p| p.group == group)
+                .map(|p| p.latency_ms)
+                .collect()
+        });
+        println!("latencies after the test: {latencies:?}");
+        assert!(
+            latencies.iter().all(|&latency| latency < 0),
+            "the dummy proxies must fail: {latencies:?}"
+        );
+
+        engine
+            .handle(Command::DeleteProfile(members(&engine)[0]))
+            .await;
+        engine.refresh(true).await;
+        assert_eq!(members(&engine).len(), 1, "one profile is left");
+
+        engine.handle(Command::DeleteGroup(group)).await;
+        engine.refresh(true).await;
+        assert!(
+            engine
+                .shared
+                .read(|st| st.groups.iter().all(|g| g.id != group)),
+            "the group is still listed"
+        );
+        assert_eq!(
+            engine.shared.read(|st| st.prefs.servers_group),
+            ALL_GROUPS,
+            "the deleted tab goes back to Все"
+        );
 
         handle.shutdown().await;
         state

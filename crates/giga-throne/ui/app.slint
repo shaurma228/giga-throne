@@ -6,6 +6,7 @@ import "fonts/Manrope-Variable.ttf";
 import "fonts/JetBrainsMono-Variable.ttf";
 import { NavRail } from "components/nav-rail.slint";
 import { ServerList, ServerItem } from "components/server-list.slint";
+import { ServersScreen, ServersData, GroupTabItem } from "screens/servers.slint";
 import { HomeScreen } from "screens/home.slint";
 import { RoutesScreen, PresetItem, RouteItem } from "screens/routes.slint";
 import {
@@ -15,7 +16,7 @@ import {
 
 export {
     Theme, ServerItem, PresetItem, RouteItem, EditorState, BucketItem, ChipItem, ReadyListItem,
-    RuleItem, CondItem, ValueItem, CondChoice, ActionChoice,
+    RuleItem, CondItem, ValueItem, CondChoice, ActionChoice, ServersData, GroupTabItem,
 }
 
 export component AppWindow inherits Window {
@@ -30,7 +31,8 @@ export component AppWindow inherits Window {
 
     in property <string> engine-status: "Движок запускается…";
 
-    // Page shown: 0 Home (with the server list), 1 Routes, 2 the route editor (opened from Routes).
+    // Page shown: 0 Home (with the server list), 1 Routes, 2 the route editor (opened from Routes),
+    // 3 Servers.
     in-out property <int> page: 0;
 
     // Home screen state, set from Rust (src/view.rs).
@@ -55,6 +57,13 @@ export component AppWindow inherits Window {
     // "Системный прокси" switch, set from Rust (src/view.rs).
     in-out property <bool> sysproxy-on: true;
 
+    // Servers page state, set from Rust (src/view.rs). The texts of the add dialog are
+    // kept here so that Rust can clear them after an import.
+    in-out property <ServersData> servers-data;
+    in-out property <string> servers-links;
+    in-out property <string> servers-sub-url;
+    in-out property <string> servers-sub-name;
+
     // Routes screen state, set from Rust (src/view.rs).
     in-out property <string> route-region: "ru";
     in-out property <[PresetItem]> route-presets;
@@ -76,6 +85,16 @@ export component AppWindow inherits Window {
     callback set-region(string);
     callback create-route();
     callback edit-route(int);
+    callback servers-select(int);
+    callback servers-search(string);
+    callback servers-sort(bool);
+    callback servers-test();
+    callback servers-stop-test();
+    callback servers-add-links(string, int);
+    callback servers-add-sub(string, string);
+    callback servers-update(int);
+    callback servers-delete-group(int);
+    callback servers-delete-profile(int);
 
     // Every page change goes through here: the editor asks before it is left unsaved.
     function navigate(to: int) {
@@ -163,6 +182,47 @@ export component AppWindow inherits Window {
             }
             edit-route(id) => {
                 root.edit-route(id);
+            }
+        }
+
+        if root.page == 3 : ServersScreen {
+            horizontal-stretch: 1;
+            data: root.servers-data;
+            links <=> root.servers-links;
+            sub-url <=> root.servers-sub-url;
+            sub-name <=> root.servers-sub-name;
+            select-group(id) => {
+                root.servers-select(id);
+            }
+            search(query) => {
+                root.servers-search(query);
+            }
+            sort(by-ping) => {
+                root.servers-sort(by-ping);
+            }
+            test => {
+                root.servers-test();
+            }
+            stop-test => {
+                root.servers-stop-test();
+            }
+            add-links(text, group) => {
+                root.servers-add-links(text, group);
+            }
+            add-sub(url, name) => {
+                root.servers-add-sub(url, name);
+            }
+            update-group(id) => {
+                root.servers-update(id);
+            }
+            delete-group(id) => {
+                root.servers-delete-group(id);
+            }
+            delete-profile(id) => {
+                root.servers-delete-profile(id);
+            }
+            pick(id) => {
+                root.pick(id);
             }
         }
 

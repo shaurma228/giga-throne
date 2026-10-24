@@ -7,6 +7,7 @@ mod engine;
 mod prefs;
 mod presets;
 mod route_editor;
+mod servers;
 mod sidecar;
 mod sysproxy;
 mod view;

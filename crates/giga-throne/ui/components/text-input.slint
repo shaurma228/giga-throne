@@ -13,6 +13,8 @@ export component GtInput inherits Rectangle {
     in property <bool> flat: false;
 
     callback accepted(string);
+    // Fires on every change made by the user, not on a change of `text` from code.
+    callback edited(string);
 
     height: 40px;
     min-width: 1px;
@@ -84,6 +86,10 @@ export component GtInput inherits Rectangle {
 
             accepted => {
                 root.accepted(self.text);
+            }
+
+            edited => {
+                root.edited(self.text);
             }
         }
     }

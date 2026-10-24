@@ -11,7 +11,8 @@ use throne_api::types::{ConnectionState, LiveStatsResponse, Profile, Route, Stat
 
 use crate::editor_ui::{self, EditorEvent};
 use crate::presets::{self, Preset};
-use crate::{AppWindow, PresetItem, RouteItem, ServerItem};
+use crate::servers::{self, ServersBusy, ServersView};
+use crate::{AppWindow, GroupTabItem, PresetItem, RouteItem, ServerItem, ServersData};
 
 /// A command that is in flight on the engine side, shown until it finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,8 @@ pub struct HomeView {
 pub struct ServerRow {
     pub id: i64,
     pub name: String,
+    /// The address Throne shows, on the Servers page card.
+    pub address: String,
     pub code: String,
     pub proto: String,
     /// Last URL test in ms; 0 not tested, negative when the test failed.
@@ -125,6 +128,12 @@ pub struct Frame {
     pub clear_import: bool,
     /// The "Системный прокси" preference, for its switch.
     pub system_proxy: bool,
+    /// The whole Servers page, present only when something on it changed.
+    pub servers_page: Option<ServersView>,
+    /// Clear the "Ссылки" box (the last import succeeded).
+    pub clear_servers_links: bool,
+    /// Clear the subscription fields (the last subscription was added).
+    pub clear_servers_sub: bool,
 }
 
 /// Formats a transfer rate in bytes per second, 1024-based: "512 Б/с", "12.3 КБ/с".
@@ -195,6 +204,7 @@ pub fn server_row(profile: &Profile) -> ServerRow {
     ServerRow {
         id: profile.id,
         name: profile.name.clone(),
+        address: profile.address.clone(),
         code: country_code(&profile.country),
         proto: proto_tag(&profile.r#type),
         latency: profile.latency_ms,
@@ -462,15 +472,93 @@ fn apply(window: &AppWindow, frame: Frame) {
     if let Some(routes) = frame.routes {
         apply_routes(window, routes);
     }
+    if let Some(page) = frame.servers_page {
+        apply_servers(window, page);
+    }
+    if frame.clear_servers_links {
+        window.set_servers_links("".into());
+    }
+    if frame.clear_servers_sub {
+        window.set_servers_sub_url("".into());
+        window.set_servers_sub_name("".into());
+    }
     if let Some(event) = frame.editor {
         editor_ui::on_event(event);
     }
+}
+
+/// Sets the Servers page. Counts and indexes are `i32` in Slint; out of range ones saturate.
+fn apply_servers(window: &AppWindow, view: ServersView) {
+    let groups: Vec<GroupTabItem> = view
+        .groups
+        .iter()
+        .map(|tab| GroupTabItem {
+            id: to_i32(tab.id),
+            label: tab.label.as_str().into(),
+            count: tab.count.to_string().into(),
+            subscription: tab.subscription,
+        })
+        .collect();
+    let cards: Vec<ServerItem> = view.cards.iter().map(to_item).collect();
+    let (busy_update, busy_delete, busy_import, busy_add) = match &view.busy {
+        Some(ServersBusy::Update(id)) => (to_i32(*id), false, false, false),
+        Some(ServersBusy::DeleteGroup) => (-1, true, false, false),
+        Some(ServersBusy::Import) => (-1, false, true, false),
+        Some(ServersBusy::AddSubscription) => (-1, false, false, true),
+        None => (-1, false, false, false),
+    };
+    let subscription = view
+        .subscription
+        .clone()
+        .unwrap_or(servers::SubscriptionCard {
+            name: String::new(),
+            meta: String::new(),
+            count: String::new(),
+        });
+    let plain = view.plain.clone().unwrap_or(servers::PlainGroup {
+        name: String::new(),
+        count: String::new(),
+    });
+    let test_text = view
+        .test
+        .map(|(tested, total)| servers::test_progress_text(tested, total))
+        .unwrap_or_default();
+    let data = ServersData {
+        groups: ModelRc::new(VecModel::from(groups)),
+        cards: ModelRc::new(VecModel::from(cards)),
+        selected: to_i32(view.selected),
+        can_delete: view.can_delete,
+        sub_visible: view.subscription.is_some(),
+        sub_name: subscription.name.as_str().into(),
+        sub_meta: subscription.meta.as_str().into(),
+        sub_count: subscription.count.as_str().into(),
+        plain_visible: view.plain.is_some(),
+        plain_name: plain.name.as_str().into(),
+        plain_count: plain.count.as_str().into(),
+        by_ping: view.by_ping,
+        empty_text: view.empty_text.as_str().into(),
+        test_running: view.test.is_some(),
+        test_text: test_text.as_str().into(),
+        busy_update,
+        busy_delete,
+        busy_import,
+        busy_add,
+        import_target: to_i32(view.import_target),
+        note: view.note.text.as_str().into(),
+        note_bad: view.note.bad,
+    };
+    window.set_servers_data(data);
+}
+
+fn to_i32(value: i64) -> i32 {
+    i32::try_from(value).unwrap_or(-1)
 }
 
 fn to_item(row: &ServerRow) -> ServerItem {
     ServerItem {
         id: i32::try_from(row.id).unwrap_or(-1),
         name: row.name.as_str().into(),
+        address: row.address.as_str().into(),
         code: row.code.as_str().into(),
         proto: row.proto.as_str().into(),
         ping: i32::try_from(row.latency).unwrap_or(i32::MAX),

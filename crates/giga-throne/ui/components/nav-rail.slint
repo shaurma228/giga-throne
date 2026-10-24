@@ -39,11 +39,13 @@ export component NavRail inherits Rectangle {
             }
         }
 
-        // Icons from the design (docs/design/Routes.dc.html), drawn in a 24px box.
-        for item[i] in [
-            { label: "Главная", icon: "M 3 11 L 12 4 L 21 11 M 5 10 L 5 20 L 19 20 L 19 10", enabled: true },
-            { label: "Маршруты", icon: "M 6 3 L 6 21 M 6 9 A 6 6 0 0 0 12 15 L 18 15 M 15 12 L 18 15 L 15 18", enabled: true },
-            { label: "Статистика", icon: "M 5 20 L 5 11 M 12 20 L 12 4 M 19 20 L 19 14", enabled: false },
+        // Icons from the design (docs/design/Routes.dc.html and Servers.dc.html), drawn in a 24px box.
+        // `page` is the page the item opens; -1 for the item that is not there yet.
+        for item in [
+            { label: "Главная", page: 0, icon: "M 3 11 L 12 4 L 21 11 M 5 10 L 5 20 L 19 20 L 19 10", enabled: true },
+            { label: "Серверы", page: 3, icon: "M 3 12 A 9 9 0 1 0 21 12 A 9 9 0 1 0 3 12 M 3 12 L 21 12 M 12 3 A 14 14 0 0 1 12 21 A 14 14 0 0 1 12 3", enabled: true },
+            { label: "Маршруты", page: 1, icon: "M 6 3 L 6 21 M 6 9 A 6 6 0 0 0 12 15 L 18 15 M 15 12 L 18 15 L 15 18", enabled: true },
+            { label: "Статистика", page: -1, icon: "M 5 20 L 5 11 M 12 20 L 12 4 M 19 20 L 19 14", enabled: false },
         ] : HorizontalLayout {
             alignment: center;
 
@@ -51,7 +53,7 @@ export component NavRail inherits Rectangle {
                 width: 44px;
                 height: 44px;
                 border-radius: Theme.radius-s;
-                background: root.active == i && item.enabled ? Theme.raised : transparent;
+                background: root.active == item.page && item.enabled ? Theme.raised : transparent;
                 accessible-role: button;
                 accessible-label: item.label;
                 accessible-enabled: item.enabled;
@@ -62,7 +64,7 @@ export component NavRail inherits Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     commands: item.icon;
-                    stroke: !item.enabled ? Theme.line : root.active == i ? Theme.accent : Theme.muted;
+                    stroke: !item.enabled ? Theme.line : root.active == item.page ? Theme.accent : Theme.muted;
                     stroke-width: 2px;
                     stroke-line-cap: round;
                     stroke-line-join: round;
@@ -73,7 +75,7 @@ export component NavRail inherits Rectangle {
                     enabled: item.enabled;
                     mouse-cursor: item.enabled ? pointer : default;
                     clicked => {
-                        root.navigate(i);
+                        root.navigate(item.page);
                     }
                 }
             }

@@ -24,6 +24,9 @@ pub struct Prefs {
     /// Region chosen on the Routes screen ("ru", "cn" or "ir"). Files written
     /// before it existed have none, so they get the default.
     pub route_region: String,
+    /// Group tab chosen on the Servers page; -1 is "Все". Files written before
+    /// it existed get "Все".
+    pub servers_group: i64,
 }
 
 impl Default for Prefs {
@@ -31,6 +34,7 @@ impl Default for Prefs {
         Self {
             system_proxy: true,
             route_region: DEFAULT_REGION.to_owned(),
+            servers_group: crate::servers::ALL_GROUPS,
         }
     }
 }
@@ -106,12 +110,23 @@ mod tests {
     }
 
     #[test]
+    fn file_without_servers_group_shows_all_groups() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = path(dir.path());
+        fs::write(&file, r#"{"route_region": "cn"}"#).expect("write");
+        let prefs = load(&file);
+        assert_eq!(prefs.servers_group, -1);
+        assert_eq!(prefs.route_region, "cn");
+    }
+
+    #[test]
     fn save_then_load_round_trips() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("nested").join(PREFS_FILE);
         let prefs = Prefs {
             system_proxy: false,
             route_region: "cn".to_owned(),
+            servers_group: 4,
         };
         save(&file, &prefs).expect("save");
         assert_eq!(load(&file), prefs);

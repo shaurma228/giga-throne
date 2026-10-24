@@ -1,0 +1,1156 @@
+import { Theme } from "../theme.slint";
+import { GtInput } from "../components/text-input.slint";
+import { ServerItem } from "../components/server-list.slint";
+
+// One tab of the group bar. Built in Rust (src/view.rs).
+export struct GroupTabItem {
+    id: int,
+    label: string,
+    count: string,
+    subscription: bool,
+}
+
+// Everything the Servers page shows. Built in Rust (src/view.rs); the page only lays it out.
+export struct ServersData {
+    groups: [GroupTabItem],
+    cards: [ServerItem],
+    // The tab on show: a group id, or -1 for "Все".
+    selected: int,
+    // The selected tab is a group and another group remains.
+    can-delete: bool,
+    sub-visible: bool,
+    sub-name: string,
+    sub-meta: string,
+    sub-count: string,
+    plain-visible: bool,
+    plain-name: string,
+    plain-count: string,
+    by-ping: bool,
+    empty-text: string,
+    test-running: bool,
+    test-text: string,
+    // Id of the group being updated, or -1.
+    busy-update: int,
+    busy-delete: bool,
+    busy-import: bool,
+    busy-add: bool,
+    // The group the "Ссылки" import goes into, or -1 for Throne's default group.
+    import-target: int,
+    note: string,
+    note-bad: bool,
+}
+
+// Refresh mark of a subscription, drawn in a 24px box.
+component RefreshMark inherits Path {
+    width: 20px;
+    height: 20px;
+    commands: "M 4 12 A 8 8 0 0 1 18 6.7 L 20 9 M 20 4 L 20 9 L 15 9 M 20 12 A 8 8 0 0 1 6 17.3 L 4 15 M 4 20 L 4 15 L 9 15";
+    fill: transparent;
+    stroke-width: 2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+// A group tab: a pill, dark on the tab that is on.
+component GroupPill inherits Rectangle {
+    in property <GroupTabItem> item;
+    in property <bool> active;
+
+    callback pick();
+
+    height: 36px;
+    border-radius: 18px;
+    border-width: root.active ? 0px : 1px;
+    border-color: Theme.line;
+    background: root.active ? Theme.text : transparent;
+    accessible-role: tab;
+    accessible-label: root.item.label;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        padding-left: 14px;
+        padding-right: 14px;
+
+        Text {
+            text: root.item.label;
+            color: root.active ? Theme.bg : Theme.text-2;
+            font-family: Theme.font-body;
+            font-size: 13px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+
+        if root.item.subscription : HorizontalLayout {
+            alignment: center;
+
+            RefreshMark {
+                stroke: root.active ? Theme.bg : Theme.muted;
+            }
+        }
+
+        Text {
+            text: root.item.count;
+            color: root.active ? Theme.bg : Theme.muted;
+            font-family: Theme.font-mono;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.pick();
+        }
+    }
+}
+
+// One server card of the grid. A click connects; the "⋯" button or a right click
+// opens the delete strip, and its "Удалить" deletes the profile.
+component ServerCard inherits Rectangle {
+    in property <ServerItem> item;
+    in property <bool> confirming;
+
+    callback pick();
+    callback menu();
+    callback remove();
+    callback cancel();
+
+    private property <color> tag-color: root.item.proto == "VLESS" ? Theme.proto-vless
+        : root.item.proto == "HY2" ? Theme.proto-hy2
+        : root.item.proto == "TUIC" ? Theme.proto-tuic
+        : root.item.proto == "TROJAN" ? Theme.proto-trojan
+        : root.item.proto == "SS" ? Theme.proto-ss
+        : root.item.proto == "WG" ? Theme.proto-wg
+        : Theme.muted;
+    private property <color> bar-color: root.item.bars >= 3 ? Theme.ping-ok
+        : root.item.bars == 2 ? Theme.ping-mid
+        : Theme.ping-bad;
+
+    min-height: 104px;
+    horizontal-stretch: 1;
+    border-radius: 16px;
+    border-width: 1.5px;
+    border-color: root.item.running ? Theme.accent : Theme.raised;
+    background: root.item.running ? Theme.connect-off : Theme.panel;
+
+    animate border-color {
+        duration: Theme.anim-fast;
+    }
+
+    // Behind the content: a click anywhere on the card connects.
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: !root.confirming;
+        mouse-cursor: pointer;
+        clicked => {
+            root.pick();
+        }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                root.menu();
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: Theme.radius-s;
+                background: root.item.running ? Theme.line : Theme.raised;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.item.code;
+                    color: Theme.text;
+                    font-family: Theme.font-display;
+                    font-size: 11px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 2px;
+
+                Text {
+                    text: root.item.name;
+                    color: Theme.text;
+                    font-family: Theme.font-body;
+                    font-size: 15px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: root.item.address;
+                    color: Theme.muted;
+                    font-family: Theme.font-body;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+
+            // "⋯": three dots, drawn with rectangles.
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 8px;
+                background: menu-touch.has-hover ? Theme.raised : transparent;
+                accessible-role: button;
+                accessible-label: "Удалить сервер";
+
+                VerticalLayout {
+                    alignment: center;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 3px;
+
+                        for dot in [0, 1, 2] : Rectangle {
+                            width: 4px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.muted;
+                        }
+                    }
+                }
+
+                menu-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.menu();
+                    }
+                }
+            }
+        }
+
+        if !root.confirming : HorizontalLayout {
+            alignment: space-between;
+
+            Rectangle {
+                height: 22px;
+                width: tag.preferred-width + 12px;
+                border-radius: 6px;
+                background: tag-color.with-alpha(0.12);
+
+                tag := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.item.proto;
+                    color: tag-color;
+                    font-family: Theme.font-body;
+                    font-size: 11px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 2px;
+
+                    if root.item.ping >= 0 : Rectangle {
+                        width: 3px;
+                        height: 6px;
+                        border-radius: 1px;
+                        background: root.item.bars >= 1 ? root.bar-color : Theme.line;
+                    }
+
+                    if root.item.ping >= 0 : Rectangle {
+                        width: 3px;
+                        height: 10px;
+                        border-radius: 1px;
+                        background: root.item.bars >= 2 ? root.bar-color : Theme.line;
+                    }
+
+                    if root.item.ping >= 0 : Rectangle {
+                        width: 3px;
+                        height: 14px;
+                        border-radius: 1px;
+                        background: root.item.bars >= 3 ? root.bar-color : Theme.line;
+                    }
+
+                    if root.item.ping < 0 : Text {
+                        width: 18px;
+                        text: "×";
+                        color: Theme.ping-bad;
+                        font-family: Theme.font-body;
+                        font-size: 14px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    width: 60px;
+                    text: root.item.ping-text;
+                    color: root.item.ping < 0 ? Theme.ping-bad : Theme.muted;
+                    font-family: Theme.font-mono;
+                    font-size: 12px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.confirming : HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: "Удалить сервер?";
+                color: Theme.text-2;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 96px;
+                height: 32px;
+                border-radius: 10px;
+                background: Theme.ping-bad.with-alpha(0.14);
+                accessible-role: button;
+                accessible-label: "Удалить";
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Удалить";
+                    color: Theme.ping-bad;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.remove();
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 84px;
+                height: 32px;
+                border-radius: 10px;
+                background: Theme.raised;
+                accessible-role: button;
+                accessible-label: "Отмена";
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Отмена";
+                    color: Theme.text;
+                    font-family: Theme.font-body;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Servers page: toolbar (search, test, add), group tabs, the selected group's card or
+// row, and the grid of servers. The "Добавить" dialog is drawn over the page.
+// Texts and lists come from Rust (src/view.rs).
+export component ServersScreen inherits Rectangle {
+    in property <ServersData> data;
+    in-out property <string> links;
+    in-out property <string> sub-url;
+    in-out property <string> sub-name;
+
+    callback select-group(int);
+    callback search(string);
+    callback sort(bool);
+    callback test();
+    callback stop-test();
+    callback add-links(string, int);
+    callback add-sub(string, string);
+    callback update-group(int);
+    callback delete-group(int);
+    callback delete-profile(int);
+    callback pick(int);
+
+    // The "Добавить" dialog, and its tab: 0 links, 1 subscription.
+    property <bool> add-open: false;
+    property <int> add-tab: 0;
+    // The group delete waits for a second press. Reset when another tab is picked.
+    property <bool> group-confirm: false;
+    // Id of the card whose delete strip is open, or -1.
+    property <int> confirm-id: -1;
+    property <string> search-text;
+
+    background: Theme.bg;
+
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        interactive: true;
+        content-height: content.preferred-height;
+
+        content := VerticalLayout {
+            width: parent.width;
+            padding-top: 28px;
+            padding-bottom: 28px;
+            padding-left: 28px;
+            padding-right: 28px;
+            spacing: 16px;
+
+            // Toolbar: title, search, test and add.
+            HorizontalLayout {
+                spacing: 12px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Серверы";
+                    color: Theme.text;
+                    font-family: Theme.font-display;
+                    font-size: 26px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                GtInput {
+                    width: 240px;
+                    placeholder: "Город, протокол…";
+                    text <=> root.search-text;
+                    edited(text) => {
+                        root.search(text);
+                    }
+                }
+
+                if data.test-running : Text {
+                    text: data.test-text;
+                    color: Theme.muted;
+                    font-family: Theme.font-mono;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    width: 140px;
+                    height: 40px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    background: test-touch.has-hover ? Theme.raised : transparent;
+                    accessible-role: button;
+                    accessible-label: data.test-running ? "Стоп" : "Тест пинга";
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        if !data.test-running : Path {
+                            width: 16px;
+                            height: 16px;
+                            commands: "M 13 2 L 4 14 L 11 14 L 10 22 L 19 10 L 12 10 Z";
+                            stroke: Theme.text;
+                            stroke-width: 2px;
+                            stroke-line-join: round;
+                            fill: transparent;
+                        }
+
+                        Text {
+                            text: data.test-running ? "Стоп" : "Тест пинга";
+                            color: Theme.text;
+                            font-family: Theme.font-body;
+                            font-size: 14px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    test-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if data.test-running {
+                                root.stop-test();
+                            } else {
+                                root.test();
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 120px;
+                    height: 40px;
+                    border-radius: 12px;
+                    background: add-touch.pressed ? Theme.accent.darker(0.15)
+                        : add-touch.has-hover ? Theme.accent.brighter(0.12)
+                        : Theme.accent;
+                    accessible-role: button;
+                    accessible-label: "Добавить";
+
+                    animate background {
+                        duration: Theme.anim-fast;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            commands: "M 12 5 L 12 19 M 5 12 L 19 12";
+                            stroke: Theme.on-accent;
+                            stroke-width: 2.5px;
+                            stroke-line-cap: round;
+                            fill: transparent;
+                        }
+
+                        Text {
+                            text: "Добавить";
+                            color: Theme.on-accent;
+                            font-family: Theme.font-body;
+                            font-size: 14px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    add-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.add-open = true;
+                        }
+                    }
+                }
+            }
+
+            // Group tabs, and the sort toggle on the right.
+            HorizontalLayout {
+                spacing: 8px;
+
+                for tab in data.groups : GroupPill {
+                    item: tab;
+                    active: tab.id == data.selected;
+                    pick => {
+                        root.group-confirm = false;
+                        root.select-group(tab.id);
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                Rectangle {
+                    width: 236px;
+                    height: 36px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 2px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 9px;
+                            background: data.by-ping ? transparent : Theme.raised;
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "как в группе";
+                                color: data.by-ping ? Theme.muted : Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.sort(false);
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 9px;
+                            background: data.by-ping ? Theme.raised : transparent;
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "по пингу";
+                                color: data.by-ping ? Theme.text : Theme.muted;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.sort(true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if data.note != "" && !root.add-open : Text {
+                text: data.note;
+                color: data.note-bad ? Theme.ping-bad : Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            // The selected subscription: name, when it was updated, its size, and update/delete.
+            if data.sub-visible : Rectangle {
+                height: 72px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: Theme.raised;
+                background: Theme.panel;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 12px;
+                            background: Theme.raised;
+
+                            HorizontalLayout {
+                                alignment: center;
+
+                                RefreshMark {
+                                    stroke: Theme.accent;
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        spacing: 4px;
+
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: 8px;
+
+                            Text {
+                                text: data.sub-name;
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 15px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: data.sub-meta;
+                                color: Theme.muted;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: data.sub-count;
+                            color: Theme.text-2;
+                            font-family: Theme.font-mono;
+                            font-size: 12px;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 116px;
+                            height: 36px;
+                            border-radius: 10px;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            opacity: data.busy-update == data.selected ? 0.5 : 1;
+                            accessible-role: button;
+                            accessible-label: "Обновить";
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: data.busy-update == data.selected ? "Обновляем…" : "Обновить";
+                                color: Theme.text;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if data.busy-update != data.selected {
+                                        root.update-group(data.selected);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        if data.can-delete : Rectangle {
+                            width: 96px;
+                            height: 36px;
+                            border-radius: 10px;
+                            border-width: root.group-confirm ? 0px : 1px;
+                            border-color: Theme.line;
+                            background: root.group-confirm ? Theme.ping-bad.with-alpha(0.14) : transparent;
+                            accessible-role: button;
+                            accessible-label: "Удалить группу";
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: root.group-confirm ? "Точно?" : "Удалить";
+                                color: root.group-confirm ? Theme.ping-bad : Theme.text-2;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if root.group-confirm {
+                                        root.group-confirm = false;
+                                        root.delete-group(data.selected);
+                                    } else {
+                                        root.group-confirm = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // A plain group: a slim row with its name, size and delete.
+            if data.plain-visible : Rectangle {
+                height: 52px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: Theme.raised;
+                background: Theme.panel;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 10px;
+                    spacing: 12px;
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: data.plain-name;
+                        color: Theme.text;
+                        font-family: Theme.font-body;
+                        font-size: 14px;
+                        font-weight: 700;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: data.plain-count;
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        if data.can-delete : Rectangle {
+                            width: 96px;
+                            height: 36px;
+                            border-radius: 10px;
+                            border-width: root.group-confirm ? 0px : 1px;
+                            border-color: Theme.line;
+                            background: root.group-confirm ? Theme.ping-bad.with-alpha(0.14) : transparent;
+                            accessible-role: button;
+                            accessible-label: "Удалить группу";
+
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: root.group-confirm ? "Точно?" : "Удалить";
+                                color: root.group-confirm ? Theme.ping-bad : Theme.text-2;
+                                font-family: Theme.font-body;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if root.group-confirm {
+                                        root.group-confirm = false;
+                                        root.delete-group(data.selected);
+                                    } else {
+                                        root.group-confirm = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if data.cards.length == 0 : Text {
+                text: data.empty-text;
+                color: Theme.muted;
+                font-family: Theme.font-body;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            // Three equal columns, row by row.
+            GridLayout {
+                spacing: 12px;
+
+                for card[i] in data.cards : ServerCard {
+                    row: floor(i / 3);
+                    col: mod(i, 3);
+                    item: card;
+                    confirming: root.confirm-id == card.id;
+                    pick => {
+                        root.pick(card.id);
+                    }
+                    menu => {
+                        root.confirm-id = card.id;
+                    }
+                    remove => {
+                        root.confirm-id = -1;
+                        root.delete-profile(card.id);
+                    }
+                    cancel => {
+                        root.confirm-id = -1;
+                    }
+                }
+            }
+        }
+    }
+
+    // The "Добавить" dialog: links to paste, or a subscription to add.
+    if root.add-open : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Theme.scrim;
+
+        // Swallows the clicks that would reach the page behind.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+        }
+
+        dialog := Rectangle {
+            width: 580px;
+            height: dialog-body.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 24px;
+            border-width: 1px;
+            border-color: Theme.line;
+            background: Theme.surface;
+
+            dialog-body := VerticalLayout {
+                padding: 24px;
+                spacing: 18px;
+
+                HorizontalLayout {
+                    Text {
+                        horizontal-stretch: 1;
+                        text: "Добавить серверы";
+                        color: Theme.text;
+                        font-family: Theme.font-display;
+                        font-size: 20px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 10px;
+                        background: Theme.raised;
+                        accessible-role: button;
+                        accessible-label: "Закрыть";
+
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            commands: "M 6 6 L 18 18 M 18 6 L 6 18";
+                            stroke: Theme.text-2;
+                            stroke-width: 2.5px;
+                            stroke-line-cap: round;
+                            fill: transparent;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.add-open = false;
+                            }
+                        }
+                    }
+                }
+
+                // Tabs of the dialog.
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 4px;
+
+                    for tab-label[i] in ["Ссылки", "Подписка"] : Rectangle {
+                        horizontal-stretch: 1;
+                        height: 36px;
+                        border-radius: 10px;
+                        background: root.add-tab == i ? Theme.raised : transparent;
+                        accessible-role: tab;
+                        accessible-label: tab-label;
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: tab-label;
+                            color: root.add-tab == i ? Theme.text : Theme.muted;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.add-tab = i;
+                            }
+                        }
+                    }
+                }
+
+                if root.add-tab == 0 : VerticalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: "Ссылки — по одной на строку";
+                        color: Theme.text-2;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        font-weight: 600;
+                    }
+
+                    Rectangle {
+                        height: 150px;
+                        border-radius: 14px;
+                        border-width: 1.5px;
+                        border-color: Theme.accent;
+                        background: Theme.bg;
+                        clip: true;
+
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: text;
+                            clicked => {
+                                links-input.focus();
+                            }
+                        }
+
+                        Text {
+                            x: 14px;
+                            y: 12px;
+                            width: parent.width - 28px;
+                            text: "vless://…\nhy2://…\nss://…";
+                            color: Theme.muted;
+                            font-family: Theme.font-mono;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                            visible: root.links == "";
+                        }
+
+                        links-input := TextInput {
+                            x: 14px;
+                            y: 12px;
+                            width: parent.width - 28px;
+                            height: parent.height - 24px;
+                            single-line: false;
+                            wrap: word-wrap;
+                            text <=> root.links;
+                            color: Theme.text;
+                            font-family: Theme.font-mono;
+                            font-size: 12px;
+                            selection-background-color: Theme.accent;
+                            selection-foreground-color: Theme.on-accent;
+                        }
+                    }
+                }
+
+                if root.add-tab == 1 : VerticalLayout {
+                    spacing: 14px;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "Ссылка на подписку";
+                            color: Theme.text-2;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            font-weight: 600;
+                        }
+
+                        GtInput {
+                            height: 44px;
+                            placeholder: "https://…/sub/…";
+                            text-size: 13px;
+                            text-font: Theme.font-mono;
+                            text <=> root.sub-url;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "Название";
+                            color: Theme.text-2;
+                            font-family: Theme.font-body;
+                            font-size: 13px;
+                            font-weight: 600;
+                        }
+
+                        GtInput {
+                            height: 44px;
+                            placeholder: "Моя подписка";
+                            text <=> root.sub-name;
+                        }
+                    }
+
+                    Text {
+                        text: "Скачаем список серверов по ссылке в новую группу. Обновлять его можно кнопкой «Обновить».";
+                        color: Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+
+                // The result of the last action, and the button of this tab.
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: data.note;
+                        color: data.note-bad ? Theme.ping-bad : Theme.muted;
+                        font-family: Theme.font-body;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 150px;
+                        height: 48px;
+                        border-radius: 14px;
+                        background: Theme.accent;
+                        opacity: (root.add-tab == 0 ? data.busy-import : data.busy-add) ? 0.5 : 1;
+                        accessible-role: button;
+                        accessible-label: root.add-tab == 1 ? "Подписаться" : "Добавить";
+
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: (root.add-tab == 0 ? data.busy-import : data.busy-add) ? "…"
+                                : root.add-tab == 1 ? "Подписаться" : "Добавить";
+                            color: Theme.on-accent;
+                            font-family: Theme.font-body;
+                            font-size: 15px;
+                            font-weight: 800;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.add-tab == 1 {
+                                    if !data.busy-add {
+                                        root.add-sub(root.sub-url, root.sub-name);
+                                    }
+                                } else if !data.busy-import {
+                                    root.add-links(root.links, data.import-target);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
