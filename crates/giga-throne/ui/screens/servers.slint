@@ -81,7 +81,7 @@ component GroupPill inherits Rectangle {
             vertical-alignment: center;
         }
 
-        if root.item.subscription : HorizontalLayout {
+        if root.item.subscription : VerticalLayout {
             alignment: center;
 
             RefreshMark {
@@ -476,14 +476,18 @@ export component ServersScreen inherits Rectangle {
                         alignment: center;
                         spacing: 8px;
 
-                        if !data.test-running : Path {
-                            width: 16px;
-                            height: 16px;
-                            commands: "M 13 2 L 4 14 L 11 14 L 10 22 L 19 10 L 12 10 Z";
-                            stroke: Theme.text;
-                            stroke-width: 2px;
-                            stroke-line-join: round;
-                            fill: transparent;
+                        if !data.test-running : VerticalLayout {
+                            alignment: center;
+
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                commands: "M 13 2 L 4 14 L 11 14 L 10 22 L 19 10 L 12 10 Z";
+                                stroke: Theme.text;
+                                stroke-width: 2px;
+                                stroke-line-join: round;
+                                fill: transparent;
+                            }
                         }
 
                         Text {
@@ -526,14 +530,18 @@ export component ServersScreen inherits Rectangle {
                         alignment: center;
                         spacing: 8px;
 
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            commands: "M 12 5 L 12 19 M 5 12 L 19 12";
-                            stroke: Theme.on-accent;
-                            stroke-width: 2.5px;
-                            stroke-line-cap: round;
-                            fill: transparent;
+                        VerticalLayout {
+                            alignment: center;
+
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                commands: "M 12 5 L 12 19 M 5 12 L 19 12";
+                                stroke: Theme.on-accent;
+                                stroke-width: 2.5px;
+                                stroke-line-cap: round;
+                                fill: transparent;
+                            }
                         }
 
                         Text {
@@ -1033,19 +1041,37 @@ export component ServersScreen inherits Rectangle {
                             visible: root.links == "";
                         }
 
-                        links-input := TextInput {
+                        // The text scrolls inside the fixed box; it follows the cursor line by line.
+                        links-flick := Flickable {
                             x: 14px;
                             y: 12px;
                             width: parent.width - 28px;
                             height: parent.height - 24px;
-                            single-line: false;
-                            wrap: word-wrap;
-                            text <=> root.links;
-                            color: Theme.text;
-                            font-family: Theme.font-mono;
-                            font-size: 12px;
-                            selection-background-color: Theme.accent;
-                            selection-foreground-color: Theme.on-accent;
+                            interactive: true;
+                            content-width: self.width;
+                            content-height: links-input.height;
+
+                            links-input := TextInput {
+                                width: parent.width;
+                                height: max(self.preferred-height, links-flick.height);
+                                single-line: false;
+                                wrap: word-wrap;
+                                text <=> root.links;
+                                color: Theme.text;
+                                font-family: Theme.font-mono;
+                                font-size: 12px;
+                                selection-background-color: Theme.accent;
+                                selection-foreground-color: Theme.on-accent;
+
+                                // 18px is the line height of the 12px mono text.
+                                cursor-position-changed(pos) => {
+                                    if pos.y < -links-flick.content-y {
+                                        links-flick.content-y = -pos.y;
+                                    } else if pos.y + 18px > links-flick.height - links-flick.content-y {
+                                        links-flick.content-y = -(pos.y + 18px - links-flick.height);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
