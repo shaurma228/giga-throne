@@ -602,7 +602,12 @@ impl EditorUi {
                 *self.known.borrow_mut() = rule_sets;
                 let model = EditorModel::from_share(&share, is_remote);
                 let name = model.name().to_owned();
-                *self.session.borrow_mut() = Some(Session::new(id, model));
+                let mut session = Session::new(id, model);
+                // Debug only: GIGA_THRONE_EDITOR_RULE selects a rule of the first editor.
+                if let Some(index) = crate::dev_aid::take_start_rule() {
+                    session.selected = (index < session.model.rules().len()).then_some(index);
+                }
+                *self.session.borrow_mut() = Some(session);
                 let state = window.global::<EditorState>();
                 state.set_route_name(name.as_str().into());
                 state.set_is_new(id.is_none());

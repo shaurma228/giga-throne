@@ -136,6 +136,7 @@ cargo test --workspace            # тесты (включая тест-вект
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 GIGA_THRONE_PAGE=2 cargo run -p giga-throne        # только debug: старт на странице 0 Главная, 1 Маршруты, 2 новый маршрут, 2:<id> маршрут <id>, 3 Серверы
+GIGA_THRONE_EDITOR_RULE=1 GIGA_THRONE_PAGE=2 GIGA_THRONE_EDITOR_MODE=advanced cargo run -p giga-throne  # только debug: в первом редакторе выбрано правило с индексом 1
 GIGA_THRONE_DEMO_SERVERS=1 cargo run -p giga-throne  # только debug: пустой движок получает 9 фиктивных серверов в группе «Демо» (один раз)
 GIGA_THRONE_EDITOR_MODE=advanced cargo run -p giga-throne  # только debug: редактор стартует в «Продвинуто»
 ```

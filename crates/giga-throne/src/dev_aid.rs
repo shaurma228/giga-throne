@@ -5,6 +5,7 @@
 //! "Свой маршрут"), `2:<id>` the editor of route `<id>`. The editor needs the
 //! engine, so the editor pages wait until it reports ready.
 //! `GIGA_THRONE_EDITOR_MODE=advanced` starts that first editor in "Продвинуто".
+//! `GIGA_THRONE_EDITOR_RULE=<index>` selects that rule of the first editor's list.
 //! `GIGA_THRONE_DEMO_SERVERS=1` fills an engine with no servers with nine dummy
 //! profiles in the group "Демо", once per run, to look at the Servers grid.
 //! Release builds ignore these variables.
@@ -47,6 +48,8 @@ const POLL: Duration = Duration::from_millis(100);
 thread_local! {
     /// Set at startup, taken by the first editor that opens.
     static START_ADVANCED: Cell<bool> = const { Cell::new(false) };
+    /// Rule to select in that same editor, from `GIGA_THRONE_EDITOR_RULE`.
+    static START_RULE: Cell<Option<usize>> = const { Cell::new(None) };
 }
 
 /// A page from `GIGA_THRONE_PAGE` that is not Home.
@@ -66,6 +69,12 @@ pub fn apply_startup(window: &AppWindow) {
     }
     let advanced = std::env::var("GIGA_THRONE_EDITOR_MODE").is_ok_and(|mode| mode == "advanced");
     START_ADVANCED.with(|flag| flag.set(advanced));
+    if let Ok(value) = std::env::var("GIGA_THRONE_EDITOR_RULE") {
+        match value.parse::<usize>() {
+            Ok(index) => START_RULE.with(|rule| rule.set(Some(index))),
+            Err(_) => warn!("GIGA_THRONE_EDITOR_RULE ignored: {value:?} is not an index"),
+        }
+    }
 
     let Ok(value) = std::env::var("GIGA_THRONE_PAGE") else {
         return;
@@ -83,6 +92,12 @@ pub fn apply_startup(window: &AppWindow) {
 /// for the editor requested by [`apply_startup`].
 pub fn take_start_advanced() -> bool {
     START_ADVANCED.with(|flag| flag.replace(false))
+}
+
+/// The rule index from `GIGA_THRONE_EDITOR_RULE`, once: for the editor that opens
+/// now. `None` when the variable is unset or the editor is not the first one.
+pub fn take_start_rule() -> Option<usize> {
+    START_RULE.with(|rule| rule.take())
 }
 
 /// Reads the value of `GIGA_THRONE_PAGE`: `None` for Home, otherwise the page.
