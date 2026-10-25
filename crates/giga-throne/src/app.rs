@@ -18,6 +18,7 @@ use crate::engine::{self, Command, Engine};
 use crate::prefs;
 use crate::sidecar::{Sidecar, SidecarConfig, SidecarHandle, SidecarState};
 use crate::sysproxy::SystemProxy;
+use crate::tray::TrayFeed;
 use crate::view;
 use crate::AppWindow;
 
@@ -45,13 +46,14 @@ pub fn engine_status_text(state: &SidecarState) -> String {
 /// the status line and the receiver is closed.
 ///
 /// `sysproxy` changes the desktop proxy on the engine's behalf; `data_root`
-/// holds the preferences.
+/// holds the preferences. `tray`, when there is one, sees every frame too.
 pub fn start_engine(
     runtime: &tokio::runtime::Runtime,
     window: &AppWindow,
     commands: UnboundedReceiver<Command>,
     sysproxy: Arc<SystemProxy>,
     data_root: PathBuf,
+    tray: Option<TrayFeed>,
 ) -> oneshot::Receiver<SidecarHandle> {
     let (handle_tx, handle_rx) = oneshot::channel();
     let weak = window.as_weak();
@@ -63,7 +65,12 @@ pub fn start_engine(
                 let engine = Engine::new(
                     handle.client(),
                     api_port,
-                    Box::new(move |frame| view::push(&sink_weak, frame)),
+                    Box::new(move |frame| {
+                        if let Some(tray) = &tray {
+                            tray.observe(&frame);
+                        }
+                        view::push(&sink_weak, frame);
+                    }),
                     sysproxy,
                     prefs::path(&data_root),
                 );

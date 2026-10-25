@@ -1621,6 +1621,7 @@ dependencies = [
  "anyhow",
  "directories",
  "idna",
+ "ksni",
  "serde",
  "serde_json",
  "slint",

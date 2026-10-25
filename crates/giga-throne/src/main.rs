@@ -10,6 +10,7 @@ mod route_editor;
 mod servers;
 mod sidecar;
 mod sysproxy;
+mod tray;
 mod view;
 
 use std::sync::Arc;
@@ -40,6 +41,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     let window = AppWindow::new()?;
+    let tray = tray::start(&runtime, window.as_weak());
+    // With a tray the window's close button hides it; without one, closing quits as before.
+    let close_to_tray = tray.is_some();
+    if close_to_tray {
+        window
+            .window()
+            .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+    }
     let commands = engine::bind_callbacks(&window);
     dev_aid::apply_startup(&window);
     let engine = app::start_engine(
@@ -48,10 +57,19 @@ fn main() -> anyhow::Result<()> {
         commands,
         Arc::clone(&sysproxy),
         data_root,
+        tray,
     );
     // Ctrl+C or a session logout would otherwise kill us with the system proxy still set.
     runtime.spawn(quit_on_signal());
-    let result = window.run();
+    // `window.run()` would quit once the window is hidden; with a tray the loop runs until
+    // "Выход" or a signal calls `quit_event_loop`.
+    let result = if close_to_tray {
+        window
+            .show()
+            .and_then(|()| slint::run_event_loop_until_quit())
+    } else {
+        window.run()
+    };
     // Before the engine stops: the system proxy must not outlive Throne.
     if let Err(err) = sysproxy.disable() {
         warn!("could not restore the system proxy: {err:#}");
