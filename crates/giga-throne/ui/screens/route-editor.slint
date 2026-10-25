@@ -886,12 +886,14 @@ component Details inherits Rectangle {
         }
 
         Flickable {
-            vertical-stretch: 1;
+            // As tall as its conditions, up to 260px; then it scrolls.
+            height: min(conds.preferred-height, 260px);
             interactive: true;
             content-height: conds.preferred-height;
 
             conds := VerticalLayout {
                 width: parent.width;
+                alignment: start;
                 spacing: 8px;
 
                 for cond in EditorState.conds : CondBox {
@@ -1017,6 +1019,11 @@ component Details inherits Rectangle {
                     }
                 }
             }
+        }
+
+        // The free space of the panel stays below the action, as in the design.
+        Rectangle {
+            vertical-stretch: 1;
         }
     }
 }
