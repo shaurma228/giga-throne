@@ -157,22 +157,27 @@ export component ServerList inherits Rectangle {
                             padding-right: 12px;
                             spacing: 12px;
 
-                            Rectangle {
-                                width: 34px;
-                                height: 34px;
-                                border-radius: Theme.radius-s;
-                                background: server.running ? Theme.line : Theme.raised;
+                            // Centered: a fixed-height child of a HorizontalLayout sits at the top.
+                            VerticalLayout {
+                                alignment: center;
 
-                                Text {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: server.code;
-                                    color: Theme.text;
-                                    font-family: Theme.font-display;
-                                    font-size: 12px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                Rectangle {
+                                    width: 34px;
+                                    height: 34px;
+                                    border-radius: Theme.radius-s;
+                                    background: server.running ? Theme.line : Theme.raised;
+
+                                    Text {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: server.code;
+                                        color: Theme.text;
+                                        font-family: Theme.font-display;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
 
