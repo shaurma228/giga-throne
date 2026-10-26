@@ -81,7 +81,8 @@ impl Sidecar {
             info!("adopting Throne already listening on {addr}");
             None
         } else {
-            Some(spawn(&config)?)
+            // First start: do not resume the last profile, so launching the app never turns the VPN on.
+            Some(spawn(&config, false)?)
         };
 
         let (state_tx, state_rx) = watch::channel(SidecarState::Starting);
@@ -217,7 +218,10 @@ impl Supervisor {
             } else {
                 let child = match pending.take() {
                     Some(child) => child,
-                    None => match spawn(&self.config) {
+                    // Restart after a crash or a requested restart: resume the profile that was
+                    // running. Throne forgets it on a manual disconnect, so a VPN the user turned
+                    // off is never started again here.
+                    None => match spawn(&self.config, true) {
                         Ok(child) => child,
                         Err(err) => {
                             return SidecarState::Failed {
@@ -374,8 +378,9 @@ impl Supervisor {
     }
 }
 
-/// Starts Throne with the flags of the sidecar contract.
-fn spawn(config: &SidecarConfig) -> Result<Child> {
+/// Starts Throne with the flags of the sidecar contract. Without `resume`, Throne gets
+/// `--no-resume` and does not reconnect to the last profile on boot.
+fn spawn(config: &SidecarConfig, resume: bool) -> Result<Child> {
     let mut command = Command::new(&config.binary);
     command
         .arg("--headless")
@@ -385,7 +390,11 @@ fn spawn(config: &SidecarConfig) -> Result<Child> {
         .arg(config.listen_addr())
         .arg("--api-key-file")
         .arg(config.key_file())
-        .args(["--restart-mode", "exit", "--log-format", "plain"])
+        .args(["--restart-mode", "exit", "--log-format", "plain"]);
+    if !resume {
+        command.arg("--no-resume");
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
