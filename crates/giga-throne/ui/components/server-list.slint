@@ -218,40 +218,53 @@ export component ServerList inherits Rectangle {
                                 alignment: end;
                                 spacing: 8px;
 
-                                HorizontalLayout {
-                                    alignment: end;
-                                    spacing: 2px;
+                                VerticalLayout {
+                                    alignment: center;
 
-                                    if server.ping < 0 : Text {
+                                    Rectangle {
                                         width: 18px;
-                                        text: "×";
-                                        color: Theme.ping-bad;
-                                        font-family: Theme.font-body;
-                                        font-size: 14px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-
-                                    if server.ping >= 0 : Rectangle {
-                                        width: 3px;
-                                        height: 6px;
-                                        border-radius: 1px;
-                                        background: server.bars >= 1 ? bar-color : Theme.line;
-                                    }
-
-                                    if server.ping >= 0 : Rectangle {
-                                        width: 3px;
-                                        height: 10px;
-                                        border-radius: 1px;
-                                        background: server.bars >= 2 ? bar-color : Theme.line;
-                                    }
-
-                                    if server.ping >= 0 : Rectangle {
-                                        width: 3px;
                                         height: 14px;
-                                        border-radius: 1px;
-                                        background: server.bars >= 3 ? bar-color : Theme.line;
+
+                                        if server.ping < 0 : Text {
+                                            x: 0px;
+                                            y: 0px;
+                                            width: 18px;
+                                            height: 14px;
+                                            text: "×";
+                                            color: Theme.ping-bad;
+                                            font-family: Theme.font-body;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+
+                                        if server.ping >= 0 : Rectangle {
+                                            x: 5px;
+                                            y: 8px;
+                                            width: 3px;
+                                            height: 6px;
+                                            border-radius: 1px;
+                                            background: server.bars >= 1 ? bar-color : Theme.line;
+                                        }
+
+                                        if server.ping >= 0 : Rectangle {
+                                            x: 10px;
+                                            y: 4px;
+                                            width: 3px;
+                                            height: 10px;
+                                            border-radius: 1px;
+                                            background: server.bars >= 2 ? bar-color : Theme.line;
+                                        }
+
+                                        if server.ping >= 0 : Rectangle {
+                                            x: 15px;
+                                            y: 0px;
+                                            width: 3px;
+                                            height: 14px;
+                                            border-radius: 1px;
+                                            background: server.bars >= 3 ? bar-color : Theme.line;
+                                        }
                                     }
                                 }
 
