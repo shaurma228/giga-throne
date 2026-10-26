@@ -158,23 +158,43 @@ pub fn format_duration(elapsed: Duration) -> String {
 }
 
 /// Protocol tag shown next to a server, from Throne's profile type.
+/// xray-core types come as "xray<kind>": "xrayvless" is VLESS, the bundled-config kinds are XRAY.
 pub fn proto_tag(profile_type: &str) -> String {
-    match profile_type.trim().to_ascii_lowercase().as_str() {
+    let lower = profile_type.trim().to_ascii_lowercase();
+    let (xray, kind) = match lower.strip_prefix("xray") {
+        Some(rest) => (true, rest),
+        None => (false, lower.as_str()),
+    };
+    match kind {
         "vless" => "VLESS".to_owned(),
         "hysteria" | "hysteria2" => "HY2".to_owned(),
         "tuic" => "TUIC".to_owned(),
         "trojan" => "TROJAN".to_owned(),
         "shadowsocks" => "SS".to_owned(),
         "wireguard" => "WG".to_owned(),
+        "" | "full" | "fullconfig" | "outbound" if xray => "XRAY".to_owned(),
         other => other.to_uppercase(),
     }
 }
 
-/// Two-letter country badge, or "··" when Throne has no country.
-pub fn country_code(country: &str) -> String {
+/// Two ASCII letters from the first flag emoji (a pair of regional indicators) in `name`.
+fn flag_code(name: &str) -> Option<String> {
+    let chars: Vec<char> = name.chars().collect();
+    let letter = |c: char| match c as u32 {
+        v @ 0x1F1E6..=0x1F1FF => char::from_u32(v - 0x1F1E6 + 'A' as u32),
+        _ => None,
+    };
+    chars
+        .windows(2)
+        .find_map(|pair| Some(format!("{}{}", letter(pair[0])?, letter(pair[1])?)))
+}
+
+/// Two-letter country badge. Throne's country wins; without one, a flag emoji in the
+/// profile name is used, and "··" when neither is there.
+pub fn country_code(country: &str, name: &str) -> String {
     let code = country.trim();
     if code.is_empty() {
-        "··".to_owned()
+        flag_code(name).unwrap_or_else(|| "··".to_owned())
     } else {
         code.to_uppercase()
     }
@@ -205,7 +225,7 @@ pub fn server_row(profile: &Profile) -> ServerRow {
         id: profile.id,
         name: profile.name.clone(),
         address: profile.address.clone(),
-        code: country_code(&profile.country),
+        code: country_code(&profile.country, &profile.name),
         proto: proto_tag(&profile.r#type),
         latency: profile.latency_ms,
         ping_text: ping_text(profile.latency_ms),
@@ -351,7 +371,7 @@ pub fn home_view(
     let (server_name, server_code, server_proto, server_ping) = match &current {
         Some(p) => (
             p.name.clone(),
-            country_code(&p.country),
+            country_code(&p.country, &p.name),
             proto_tag(&p.r#type),
             ping_text(p.latency_ms),
         ),
@@ -611,10 +631,36 @@ mod tests {
     }
 
     #[test]
+    fn xray_types_strip_the_xray_prefix() {
+        assert_eq!(proto_tag("xrayvless"), "VLESS");
+        assert_eq!(proto_tag("xrayvmess"), "VMESS");
+        assert_eq!(proto_tag("vmess"), "VMESS");
+        assert_eq!(proto_tag("xrayfull"), "XRAY");
+        assert_eq!(proto_tag("xrayfullconfig"), "XRAY");
+        assert_eq!(proto_tag("xrayoutbound"), "XRAY");
+        assert_eq!(proto_tag("xray"), "XRAY");
+        assert_eq!(proto_tag(""), "");
+    }
+
+    #[test]
     fn country_falls_back_to_placeholder() {
-        assert_eq!(country_code(""), "··");
-        assert_eq!(country_code("  "), "··");
-        assert_eq!(country_code("nl"), "NL");
+        assert_eq!(country_code("", ""), "··");
+        assert_eq!(country_code("  ", "server 1"), "··");
+        assert_eq!(country_code("nl", ""), "NL");
+    }
+
+    #[test]
+    fn country_falls_back_to_flag_in_name() {
+        assert_eq!(country_code("", "🇩🇪 Германия"), "DE");
+        assert_eq!(country_code("  ", "Тест 🇫🇷"), "FR");
+        assert_eq!(country_code("", "🇺🇸🇩🇪 two flags"), "US");
+        assert_eq!(country_code("", "🇩 single"), "··");
+        assert_eq!(country_code("", "no flag here"), "··");
+    }
+
+    #[test]
+    fn country_from_throne_wins_over_flag_in_name() {
+        assert_eq!(country_code("nl", "🇩🇪 Германия"), "NL");
     }
 
     #[test]
