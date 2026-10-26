@@ -63,6 +63,8 @@ pub struct ServerEntry {
     pub name: String,
     /// The profile Throne runs now.
     pub running: bool,
+    /// The profile the Home screen shows; it gets the check mark.
+    pub current: bool,
 }
 
 /// What the tray shows. Compared with the last one, so unchanged state costs nothing.
@@ -139,7 +141,7 @@ pub fn menu_model(state: &TrayState) -> MenuModel {
             Some(ServerMenuItem {
                 id: Some(i32::try_from(server.id).ok()?),
                 label: server.name.clone(),
-                checked: server.running,
+                checked: server.current,
                 enabled: true,
             })
         })
@@ -270,6 +272,7 @@ impl TrayFeed {
                     id: row.id,
                     name: row.name.clone(),
                     running: row.running,
+                    current: row.current,
                 })
                 .collect();
         }
@@ -500,6 +503,7 @@ mod tests {
             id,
             name: name.to_owned(),
             running,
+            current: running,
         }
     }
 
@@ -556,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn server_submenu_checks_the_running_profile_and_caps_the_list() {
+    fn server_submenu_checks_the_current_profile_and_caps_the_list() {
         let servers = vec![server(1, "A", false), server(2, "B", true)];
         let model = menu_model(&state(Link::On, "Защищено", servers));
         assert_eq!(model.servers.len(), 2);
@@ -565,6 +569,12 @@ mod tests {
         assert_eq!(model.servers[1].label, "B");
         assert!(model.servers[1].checked);
         assert!(model.servers.iter().all(|s| s.enabled));
+
+        // Picked while idle: checked, though nothing runs.
+        let mut picked = server(3, "C", false);
+        picked.current = true;
+        let model = menu_model(&state(Link::Off, "Не защищено", vec![picked]));
+        assert!(model.servers[0].checked);
 
         let many: Vec<ServerEntry> = (1..=20).map(|i| server(i, "x", false)).collect();
         let model = menu_model(&state(Link::Off, "Не защищено", many));

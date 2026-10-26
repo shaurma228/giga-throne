@@ -106,7 +106,7 @@ component GroupPill inherits Rectangle {
     }
 }
 
-// One server card of the grid. A click connects; the "⋯" button or a right click
+// One server card of the grid. A click picks the server; the "⋯" button or a right click
 // opens the delete strip, and its "Удалить" deletes the profile.
 component ServerCard inherits Rectangle {
     in property <ServerItem> item;
@@ -132,14 +132,14 @@ component ServerCard inherits Rectangle {
     horizontal-stretch: 1;
     border-radius: 16px;
     border-width: 1.5px;
-    border-color: root.item.running ? Theme.accent : Theme.raised;
-    background: root.item.running ? Theme.connect-off : Theme.panel;
+    border-color: root.item.current ? Theme.accent : Theme.raised;
+    background: root.item.current ? Theme.connect-off : Theme.panel;
 
     animate border-color {
         duration: Theme.anim-fast;
     }
 
-    // Behind the content: a click anywhere on the card connects.
+    // Behind the content: a click anywhere on the card picks the server.
     touch := TouchArea {
         width: parent.width;
         height: parent.height;
@@ -166,7 +166,7 @@ component ServerCard inherits Rectangle {
                 width: 34px;
                 height: 34px;
                 border-radius: Theme.radius-s;
-                background: root.item.running ? Theme.line : Theme.raised;
+                background: root.item.current ? Theme.line : Theme.raised;
 
                 Text {
                     width: parent.width;
@@ -241,22 +241,39 @@ component ServerCard inherits Rectangle {
         if !root.confirming : HorizontalLayout {
             alignment: space-between;
 
-            Rectangle {
-                height: 22px;
-                width: tag.preferred-width + 12px;
-                border-radius: 6px;
-                background: tag-color.with-alpha(0.12);
+            HorizontalLayout {
+                alignment: start;
+                spacing: 6px;
 
-                tag := Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.item.proto;
-                    color: tag-color;
-                    font-family: Theme.font-body;
-                    font-size: 11px;
-                    font-weight: 800;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                Rectangle {
+                    height: 22px;
+                    width: tag.preferred-width + 12px;
+                    border-radius: 6px;
+                    background: tag-color.with-alpha(0.12);
+
+                    tag := Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: root.item.proto;
+                        color: tag-color;
+                        font-family: Theme.font-body;
+                        font-size: 11px;
+                        font-weight: 800;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Lit dot: the server the VPN runs now, after its tag.
+                if root.item.running : VerticalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Theme.accent;
+                    }
                 }
             }
 

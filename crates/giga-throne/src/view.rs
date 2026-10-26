@@ -52,7 +52,10 @@ pub struct ServerRow {
     pub ping_text: String,
     /// Lit signal bars: 3 good, 2 medium, 1 bad, 0 not tested or failed.
     pub bars: i32,
+    /// The profile Throne runs now.
     pub running: bool,
+    /// The profile the Home screen shows: the one the big button connects, or the running one.
+    pub current: bool,
 }
 
 /// A routing command in flight, shown on its card or row until it finishes.
@@ -219,8 +222,36 @@ pub fn ping_bars(latency: i64) -> i32 {
     }
 }
 
-/// Maps a profile to a server-list row.
-pub fn server_row(profile: &Profile) -> ServerRow {
+/// The profile the Home screen shows and the server lists mark as current.
+///
+/// The running (or connecting) profile wins. Otherwise the picked one, when it is
+/// still in the list; then the last profile Throne used, then the first one.
+pub fn current_profile_id(
+    status: Option<&Status>,
+    profiles: &[Profile],
+    selected: i64,
+) -> Option<i64> {
+    let listed = |id: i64| profiles.iter().any(|p| p.id == id).then_some(id);
+    status
+        .and_then(|s| s.profile.as_ref().map(|p| p.id))
+        .or_else(|| listed(selected))
+        .or_else(|| status.and_then(|s| listed(s.last_profile_id)))
+        .or_else(|| profiles.first().map(|p| p.id))
+}
+
+/// The profile Throne runs right now: `None` unless the status says Running.
+///
+/// Read from the live status, not from the profile list, which Throne refreshes
+/// only every few seconds.
+pub fn running_profile_id(status: Option<&Status>) -> Option<i64> {
+    status
+        .filter(|s| s.state == ConnectionState::Running)
+        .and_then(|s| s.profile.as_ref().map(|p| p.id))
+}
+
+/// Maps a profile to a server-list row. `current` is the profile the Home screen shows,
+/// `running` the one Throne runs now.
+pub fn server_row(profile: &Profile, current: Option<i64>, running: Option<i64>) -> ServerRow {
     ServerRow {
         id: profile.id,
         name: profile.name.clone(),
@@ -230,7 +261,8 @@ pub fn server_row(profile: &Profile) -> ServerRow {
         latency: profile.latency_ms,
         ping_text: ping_text(profile.latency_ms),
         bars: ping_bars(profile.latency_ms),
-        running: profile.running,
+        running: running == Some(profile.id),
+        current: current == Some(profile.id),
     }
 }
 
@@ -341,10 +373,12 @@ pub fn routes_view(
 /// Computes the Home screen from the last engine status, stats and profiles.
 ///
 /// `timer` is the session time, already formatted; it is shown only while running.
+/// `selected` is the server picked on the list, or -1 for none.
 pub fn home_view(
     status: Option<&Status>,
     stats: Option<&LiveStatsResponse>,
     profiles: &[Profile],
+    selected: i64,
     pending: Option<Pending>,
     timer: String,
 ) -> HomeView {
@@ -362,12 +396,12 @@ pub fn home_view(
         None => ("off", "Не защищено"),
     };
 
-    let current = status
-        .and_then(|s| s.profile.clone())
-        .or_else(|| {
-            status.and_then(|s| profiles.iter().find(|p| p.id == s.last_profile_id).cloned())
-        })
-        .or_else(|| profiles.first().cloned());
+    let current = current_profile_id(status, profiles, selected).and_then(|id| {
+        status
+            .and_then(|s| s.profile.clone())
+            .filter(|p| p.id == id)
+            .or_else(|| profiles.iter().find(|p| p.id == id).cloned())
+    });
     let (server_name, server_code, server_proto, server_ping) = match &current {
         Some(p) => (
             p.name.clone(),
@@ -585,12 +619,14 @@ fn to_item(row: &ServerRow) -> ServerItem {
         ping_text: row.ping_text.as_str().into(),
         bars: row.bars,
         running: row.running,
+        current: row.current,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn profile(id: i64) -> Profile {
         Profile {
@@ -683,15 +719,17 @@ mod tests {
         p.country = "de".to_owned();
         p.latency_ms = 44;
         p.running = true;
-        let row = server_row(&p);
+        let row = server_row(&p, Some(7), Some(7));
         assert_eq!(row.id, 7);
         assert_eq!(row.code, "DE");
         assert_eq!(row.proto, "VLESS");
         assert_eq!(row.ping_text, "44 мс");
         assert_eq!(row.bars, 3);
         assert!(row.running);
+        assert!(row.current);
 
-        let untested = server_row(&profile(8));
+        let untested = server_row(&profile(8), Some(7), Some(7));
+        assert!(!untested.current);
         assert_eq!(untested.code, "··");
         assert_eq!(untested.ping_text, "—");
         assert_eq!(untested.bars, 0);
@@ -803,7 +841,7 @@ mod tests {
 
     #[test]
     fn home_without_profiles_asks_for_a_link() {
-        let view = home_view(None, None, &[], None, "00:00:00".to_owned());
+        let view = home_view(None, None, &[], -1, None, "00:00:00".to_owned());
         assert_eq!(view.conn, "off");
         assert_eq!(view.status_text, "Не защищено");
         assert_eq!(view.server_name, "Нет серверов");
@@ -817,6 +855,7 @@ mod tests {
             None,
             None,
             &[profile(1)],
+            -1,
             Some(Pending::Connecting),
             "x".into(),
         );
@@ -827,10 +866,90 @@ mod tests {
             None,
             None,
             &[profile(1)],
+            -1,
             Some(Pending::Disconnecting),
             "x".into(),
         );
         assert_eq!(view.status_text, "Отключаемся…");
+        assert_eq!(view.server_name, "server 1");
+    }
+
+    /// A status in `state`, running `running` when given. Built from JSON: `Status`
+    /// has no defaults.
+    fn status(state: ConnectionState, running: Option<i64>, last: i64) -> Status {
+        let mut value = json!({
+            "state": state,
+            "last_profile_id": last,
+            "tun": false,
+            "system_proxy": false,
+            "kill_switch": "off",
+            "core": false,
+            "inbound": { "enabled": false, "address": "", "port": 0 },
+            "version": "",
+            "capabilities": { "kill_switch": false, "headless": true },
+            "restart_needed": false,
+        });
+        if let Some(id) = running {
+            value["profile"] = serde_json::to_value(profile(id)).expect("profile json");
+        }
+        serde_json::from_value(value).expect("status json")
+    }
+
+    #[test]
+    fn running_id_comes_from_a_running_status_only() {
+        let running = status(ConnectionState::Running, Some(4), 4);
+        assert_eq!(running_profile_id(Some(&running)), Some(4));
+        let stopping = status(ConnectionState::Stopping, Some(4), 4);
+        assert_eq!(running_profile_id(Some(&stopping)), None);
+        let idle = status(ConnectionState::Idle, None, 4);
+        assert_eq!(running_profile_id(Some(&idle)), None);
+        assert_eq!(running_profile_id(None), None);
+    }
+
+    #[test]
+    fn current_is_the_running_profile_first() {
+        let profiles = [profile(1), profile(2), profile(3)];
+        let st = status(ConnectionState::Running, Some(2), 3);
+        assert_eq!(current_profile_id(Some(&st), &profiles, 1), Some(2));
+    }
+
+    #[test]
+    fn current_is_the_picked_profile_when_idle() {
+        let profiles = [profile(1), profile(2), profile(3)];
+        let st = status(ConnectionState::Idle, None, 3);
+        assert_eq!(current_profile_id(Some(&st), &profiles, 1), Some(1));
+    }
+
+    #[test]
+    fn current_falls_back_to_the_last_profile_when_nothing_is_picked() {
+        let profiles = [profile(1), profile(2), profile(3)];
+        let st = status(ConnectionState::Idle, None, 3);
+        assert_eq!(current_profile_id(Some(&st), &profiles, -1), Some(3));
+        // A picked profile that is gone from the list does not count.
+        assert_eq!(current_profile_id(Some(&st), &profiles, 9), Some(3));
+    }
+
+    #[test]
+    fn current_falls_back_to_the_first_profile() {
+        let profiles = [profile(1), profile(2)];
+        let st = status(ConnectionState::Idle, None, 9);
+        assert_eq!(current_profile_id(Some(&st), &profiles, -1), Some(1));
+        assert_eq!(current_profile_id(None, &profiles, -1), Some(1));
+    }
+
+    #[test]
+    fn current_is_none_without_profiles() {
+        assert_eq!(current_profile_id(None, &[], 4), None);
+        let st = status(ConnectionState::Idle, None, 4);
+        assert_eq!(current_profile_id(Some(&st), &[], 4), None);
+    }
+
+    #[test]
+    fn home_shows_the_picked_server_while_idle() {
+        let profiles = [profile(1), profile(2)];
+        let view = home_view(None, None, &profiles, 2, None, "00:00:00".to_owned());
+        assert_eq!(view.server_name, "server 2");
+        let view = home_view(None, None, &profiles, -1, None, "00:00:00".to_owned());
         assert_eq!(view.server_name, "server 1");
     }
 }

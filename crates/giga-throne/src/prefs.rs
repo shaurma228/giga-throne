@@ -15,6 +15,9 @@ use crate::presets::DEFAULT_REGION;
 /// Name of the preferences file in our data root.
 const PREFS_FILE: &str = "prefs.json";
 
+/// `selected_profile` when no server is picked.
+pub const NO_PROFILE: i64 = -1;
+
 /// What the user can change in the app.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,6 +30,9 @@ pub struct Prefs {
     /// Group tab chosen on the Servers page; -1 is "Все". Files written before
     /// it existed get "Все".
     pub servers_group: i64,
+    /// The server picked on the server list; -1 is none. The big button connects
+    /// it. Files written before it existed get none.
+    pub selected_profile: i64,
 }
 
 impl Default for Prefs {
@@ -35,6 +41,7 @@ impl Default for Prefs {
             system_proxy: true,
             route_region: DEFAULT_REGION.to_owned(),
             servers_group: crate::servers::ALL_GROUPS,
+            selected_profile: NO_PROFILE,
         }
     }
 }
@@ -120,6 +127,16 @@ mod tests {
     }
 
     #[test]
+    fn file_without_selected_profile_selects_none() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = path(dir.path());
+        fs::write(&file, r#"{"servers_group": 4}"#).expect("write");
+        let prefs = load(&file);
+        assert_eq!(prefs.selected_profile, NO_PROFILE);
+        assert_eq!(prefs.servers_group, 4);
+    }
+
+    #[test]
     fn save_then_load_round_trips() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("nested").join(PREFS_FILE);
@@ -127,6 +144,7 @@ mod tests {
             system_proxy: false,
             route_region: "cn".to_owned(),
             servers_group: 4,
+            selected_profile: 12,
         };
         save(&file, &prefs).expect("save");
         assert_eq!(load(&file), prefs);

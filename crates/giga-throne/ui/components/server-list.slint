@@ -12,6 +12,7 @@ export struct ServerItem {
     ping-text: string,
     bars: int,
     running: bool,
+    current: bool,
 }
 
 // Right panel: import box on top, the server list below.
@@ -142,10 +143,10 @@ export component ServerList inherits Rectangle {
 
                         height: 56px;
                         border-radius: Theme.radius-m;
-                        background: server.running ? Theme.raised
+                        background: server.current ? Theme.raised
                             : row-touch.has-hover ? Theme.surface
                             : transparent;
-                        border-width: server.running ? 1.5px : 0px;
+                        border-width: server.current ? 1.5px : 0px;
                         border-color: Theme.accent;
 
                         animate background {
@@ -197,6 +198,7 @@ export component ServerList inherits Rectangle {
 
                                 HorizontalLayout {
                                     alignment: start;
+                                    spacing: 6px;
 
                                     Rectangle {
                                         height: 18px;
@@ -214,6 +216,18 @@ export component ServerList inherits Rectangle {
                                             font-weight: 700;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Lit dot: the server the VPN runs now, after its tag.
+                                    if server.running : VerticalLayout {
+                                        alignment: center;
+
+                                        Rectangle {
+                                            width: 6px;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: Theme.accent;
                                         }
                                     }
                                 }

@@ -84,6 +84,10 @@ pub struct ServersInput<'a> {
     pub profiles: &'a [Profile],
     /// The tab remembered in the preferences; may name a group that is gone.
     pub selected: i64,
+    /// The profile the Home screen shows, marked on its card.
+    pub current: Option<i64>,
+    /// The profile Throne runs now, shown with the dot.
+    pub running: Option<i64>,
     pub query: &'a str,
     pub by_ping: bool,
     pub test: Option<(usize, usize)>,
@@ -106,7 +110,14 @@ pub enum TestSelection {
 pub fn servers_view(input: &ServersInput) -> ServersView {
     let selected = resolve_selected(input.groups, input.selected);
     let current = input.groups.iter().find(|group| group.id == selected);
-    let cards = visible_cards(input.profiles, selected, input.query, input.by_ping);
+    let cards = visible_cards(
+        input.profiles,
+        selected,
+        input.current,
+        input.running,
+        input.query,
+        input.by_ping,
+    );
     let empty_text = match (cards.is_empty(), input.query.trim()) {
         (false, _) => String::new(),
         (true, "") if current.is_some() => "В этой группе пока нет серверов".to_owned(),
@@ -210,13 +221,15 @@ pub fn order_cards(rows: &mut [ServerRow], by_ping: bool) {
 pub fn visible_cards(
     profiles: &[Profile],
     selected: i64,
+    current: Option<i64>,
+    running: Option<i64>,
     query: &str,
     by_ping: bool,
 ) -> Vec<ServerRow> {
     let mut rows: Vec<ServerRow> = profiles
         .iter()
         .filter(|profile| in_group(profile, selected) && matches_query(profile, query))
-        .map(server_row)
+        .map(|profile| server_row(profile, current, running))
         .collect();
     order_cards(&mut rows, by_ping);
     rows
@@ -319,6 +332,8 @@ mod tests {
             groups,
             profiles,
             selected,
+            current: None,
+            running: None,
             query,
             by_ping: false,
             test: None,
@@ -380,11 +395,27 @@ mod tests {
         let profiles = [profile(1, 1, 0), profile(2, 2, 0), profile(3, 1, 0)];
         let ids = |rows: Vec<ServerRow>| rows.iter().map(|r| r.id).collect::<Vec<_>>();
         assert_eq!(
-            ids(visible_cards(&profiles, ALL_GROUPS, "", false)),
+            ids(visible_cards(&profiles, ALL_GROUPS, None, None, "", false)),
             [1, 2, 3]
         );
-        assert_eq!(ids(visible_cards(&profiles, 1, "", false)), [1, 3]);
-        assert_eq!(ids(visible_cards(&profiles, 1, "server 3", false)), [3]);
+        assert_eq!(
+            ids(visible_cards(&profiles, 1, None, None, "", false)),
+            [1, 3]
+        );
+        assert_eq!(
+            ids(visible_cards(&profiles, 1, None, None, "server 3", false)),
+            [3]
+        );
+    }
+
+    #[test]
+    fn the_current_profile_is_marked_on_its_card() {
+        let profiles = [profile(1, 1, 0), profile(2, 1, 0)];
+        let marks: Vec<bool> = visible_cards(&profiles, ALL_GROUPS, Some(2), None, "", false)
+            .iter()
+            .map(|row| row.current)
+            .collect();
+        assert_eq!(marks, [false, true]);
     }
 
     #[test]
@@ -396,13 +427,13 @@ mod tests {
             profile(4, 1, 40),
             profile(5, 1, 0),
         ];
-        let ids: Vec<i64> = visible_cards(&profiles, ALL_GROUPS, "", true)
+        let ids: Vec<i64> = visible_cards(&profiles, ALL_GROUPS, None, None, "", true)
             .iter()
             .map(|r| r.id)
             .collect();
         // Untested (1, 5) and failed (3) keep their group order at the end.
         assert_eq!(ids, [4, 2, 1, 3, 5]);
-        let ids: Vec<i64> = visible_cards(&profiles, ALL_GROUPS, "", false)
+        let ids: Vec<i64> = visible_cards(&profiles, ALL_GROUPS, None, None, "", false)
             .iter()
             .map(|r| r.id)
             .collect();

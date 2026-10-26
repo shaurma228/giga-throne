@@ -32,14 +32,14 @@ use tokio::time::{interval_at, sleep};
 use tracing::{debug, info, warn};
 
 use crate::editor_ui::{self, EditorEvent, SavePlan};
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, NO_PROFILE};
 use crate::presets::{self, ImportKind, PresetPlan};
 use crate::servers::{self, ServersBusy, ServersInput, ServersView, TestSelection, ALL_GROUPS};
 use crate::sidecar::SidecarState;
 use crate::sysproxy::{proxy_host, SystemProxy};
 use crate::view::{
-    home_view, routes_view, server_row, Frame, HomeView, Pending, RouteBusy, RouteNote, RoutesView,
-    ServerRow,
+    current_profile_id, home_view, routes_view, running_profile_id, server_row, Frame, HomeView,
+    Pending, RouteBusy, RouteNote, RoutesView, ServerRow,
 };
 use crate::AppWindow;
 
@@ -85,10 +85,10 @@ pub type Sink = Box<dyn Fn(Frame) + Send + Sync>;
 /// A user action from the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// Connect with `select: last`, or disconnect when running.
+    /// Connect the picked server (or the last one), or disconnect when running.
     Toggle,
-    /// Connect to this profile.
-    Connect(i64),
+    /// Select this profile; when connected to another one, switch to it.
+    PickServer(i64),
     /// Import what the user pasted.
     Import(String),
     /// Flip the "Системный прокси" preference.
@@ -142,7 +142,7 @@ pub fn bind_callbacks(window: &AppWindow) -> UnboundedReceiver<Command> {
     });
     let pick = tx.clone();
     window.on_pick(move |id| {
-        let _ = pick.send(Command::Connect(i64::from(id)));
+        let _ = pick.send(Command::PickServer(i64::from(id)));
     });
     let sysproxy = tx.clone();
     window.on_toggle_sysproxy(move || {
@@ -433,7 +433,7 @@ impl Engine {
     pub async fn handle(&self, command: Command) {
         match command {
             Command::Toggle => self.report_connection(self.toggle().await),
-            Command::Connect(id) => self.report_connection(self.connect(id).await),
+            Command::PickServer(id) => self.report_connection(self.pick_server(id).await),
             Command::Import(text) => self.import(&text).await,
             Command::ToggleSystemProxy => self.toggle_system_proxy(),
             Command::SelectPreset(id) => {
@@ -1010,7 +1010,8 @@ impl Engine {
         }
     }
 
-    /// Starts the last profile when idle, stops it when running. Other states are busy.
+    /// Connects the picked server (or the last one) when idle, stops it when running.
+    /// Other states are busy.
     async fn toggle(&self) -> Result<(), Error> {
         let state = self.shared.read(|st| st.status.as_ref().map(|s| s.state));
         match state {
@@ -1024,16 +1025,41 @@ impl Engine {
             }
             Some(ConnectionState::Connecting | ConnectionState::Stopping) => Ok(()),
             _ => {
-                self.change_connection(
-                    Pending::Connecting,
-                    Method::Put,
-                    json!({ "select": "last", "timeout": CONNECTION_WAIT_SECS }),
-                )
-                .await
+                let body = self
+                    .shared
+                    .read(|st| connect_body(st.prefs.selected_profile, &st.profiles));
+                self.change_connection(Pending::Connecting, Method::Put, body)
+                    .await
             }
         }
     }
 
+    /// Selects this profile. While another profile runs, the connection switches to it;
+    /// otherwise nothing starts until the big button is pressed.
+    async fn pick_server(&self, id: i64) -> Result<(), Error> {
+        self.remember_pick(id);
+        let running = self.shared.read(|st| {
+            st.status
+                .as_ref()
+                .filter(|s| s.state == ConnectionState::Running)
+                .and_then(|s| s.profile.as_ref().map(|p| p.id))
+        });
+        match running {
+            Some(current) if current != id => self.connect(id).await,
+            _ => Ok(()),
+        }
+    }
+
+    /// Remembers the picked server and shows it on Home and the Servers page.
+    fn remember_pick(&self, id: i64) {
+        let prefs = self.shared.read(|st| Prefs {
+            selected_profile: id,
+            ..st.prefs.clone()
+        });
+        self.save_prefs(prefs);
+    }
+
+    /// Switches the connection to this profile. Does nothing when it already runs.
     async fn connect(&self, id: i64) -> Result<(), Error> {
         let already = self.shared.read(|st| {
             st.status.as_ref().is_some_and(|s| {
@@ -1151,6 +1177,16 @@ impl Engine {
     }
 }
 
+/// The body of the idle big button: the picked profile when it is still listed, else
+/// `select: last`, which is what Throne starts without a choice.
+fn connect_body(selected: i64, profiles: &[Profile]) -> Value {
+    if selected != NO_PROFILE && profiles.iter().any(|p| p.id == selected) {
+        json!({ "profile": selected, "timeout": CONNECTION_WAIT_SECS })
+    } else {
+        json!({ "select": "last", "timeout": CONNECTION_WAIT_SECS })
+    }
+}
+
 fn is_ready(state: &SidecarState) -> bool {
     matches!(state, SidecarState::Ready { .. })
 }
@@ -1186,7 +1222,8 @@ async fn command_loop(
                 | Command::DeleteProfile(_) => {
                     engine.report_servers(Err(ENGINE_NOT_READY_TEXT.to_owned()));
                 }
-                Command::Toggle | Command::Connect(_) | Command::Import(_) => {
+                Command::PickServer(id) => engine.remember_pick(id),
+                Command::Toggle | Command::Import(_) => {
                     flash_error(&engine.shared, ENGINE_NOT_READY_TEXT.to_owned());
                 }
                 Command::SaveRoute { .. } => engine.shared.update(|st| {
@@ -1354,6 +1391,10 @@ struct State {
     clear_import: bool,
     profiles_rev: u64,
     servers_rev: u64,
+    /// The profile marked as current in the server list last sent.
+    servers_current: Option<i64>,
+    /// The profile marked as running in the server list last sent.
+    servers_running: Option<i64>,
     groups: Vec<Group>,
     /// The Servers page as last sent to the UI, to send it again only when it changes.
     servers_sent: Option<ServersView>,
@@ -1439,20 +1480,29 @@ impl State {
             .running_since
             .map(|(_, at)| crate::view::format_duration(at.elapsed()))
             .unwrap_or_default();
+        let selected = self.prefs.selected_profile;
         let home: HomeView = home_view(
             self.status.as_ref(),
             self.stats.as_ref(),
             &self.profiles,
+            selected,
             self.pending,
             timer,
         );
-        let servers = (self.servers_rev != self.profiles_rev).then(|| {
-            self.servers_rev = self.profiles_rev;
-            self.profiles
-                .iter()
-                .map(server_row)
-                .collect::<Vec<ServerRow>>()
-        });
+        let current = current_profile_id(self.status.as_ref(), &self.profiles, selected);
+        let running = running_profile_id(self.status.as_ref());
+        let servers = (self.servers_rev != self.profiles_rev
+            || self.servers_current != current
+            || self.servers_running != running)
+            .then(|| {
+                self.servers_rev = self.profiles_rev;
+                self.servers_current = current;
+                self.servers_running = running;
+                self.profiles
+                    .iter()
+                    .map(|profile| server_row(profile, current, running))
+                    .collect::<Vec<ServerRow>>()
+            });
         let routes = self.routes_frame();
         let clear_import = std::mem::take(&mut self.clear_import);
         Frame {
@@ -1472,10 +1522,17 @@ impl State {
 
     /// The Servers page, when it differs from the one last sent.
     fn servers_frame(&mut self) -> Option<ServersView> {
+        let current = current_profile_id(
+            self.status.as_ref(),
+            &self.profiles,
+            self.prefs.selected_profile,
+        );
         let view = servers::servers_view(&ServersInput {
             groups: &self.groups,
             profiles: &self.profiles,
             selected: self.prefs.servers_group,
+            current,
+            running: running_profile_id(self.status.as_ref()),
             query: &self.servers_query,
             by_ping: self.servers_by_ping,
             test: self.servers_test.map(|test| (test.done, test.total)),
@@ -1924,6 +1981,29 @@ mod tests {
     }
 
     #[test]
+    fn idle_button_connects_the_picked_server_or_the_last_one() {
+        let profiles: Vec<Profile> = [3, 5]
+            .iter()
+            .map(|&id| Profile {
+                id,
+                ..Profile::default()
+            })
+            .collect();
+        assert_eq!(
+            connect_body(5, &profiles),
+            json!({ "profile": 5, "timeout": CONNECTION_WAIT_SECS })
+        );
+        let last = json!({ "select": "last", "timeout": CONNECTION_WAIT_SECS });
+        assert_eq!(connect_body(NO_PROFILE, &profiles), last);
+        assert_eq!(
+            connect_body(9, &profiles),
+            last,
+            "a removed profile is not used"
+        );
+        assert_eq!(connect_body(5, &[]), last);
+    }
+
+    #[test]
     fn import_summary_counts_failures() {
         let mut response = ImportResponse {
             group: 1,
@@ -2025,11 +2105,16 @@ mod tests {
         let profile_id = profile_id.expect("the imported profile is listed");
         println!("profile id = {profile_id}");
 
-        engine.handle(Command::Connect(profile_id)).await;
+        // Picking a server only selects it: the VPN stays off until the big button.
+        engine.handle(Command::PickServer(profile_id)).await;
+        let idle = engine.shared.read(|st| st.status.as_ref().map(|s| s.state));
+        assert_eq!(idle, Some(ConnectionState::Idle), "a pick does not connect");
+
+        engine.handle(Command::Toggle).await;
         let (running, error) = engine
             .shared
             .read(|st| (st.status.as_ref().map(|s| s.state), st.error.clone()));
-        println!("after connect: state = {running:?}, error = {error:?}");
+        println!("after toggle: state = {running:?}, error = {error:?}");
         assert_eq!(running, Some(ConnectionState::Running));
 
         engine.refresh(false).await;
@@ -2039,7 +2124,7 @@ mod tests {
 
         engine.handle(Command::Toggle).await;
         let stopped = engine.shared.read(|st| st.status.as_ref().map(|s| s.state));
-        println!("after toggle: state = {stopped:?}");
+        println!("after second toggle: state = {stopped:?}");
         assert_eq!(stopped, Some(ConnectionState::Idle));
 
         handle.shutdown().await;
